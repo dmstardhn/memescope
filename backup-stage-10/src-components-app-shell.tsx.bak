@@ -1,0 +1,12 @@
+import { Sidebar } from "@/components/sidebar";
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[#080a0f] text-zinc-100">
+      <div className="mx-auto flex min-h-screen max-w-[1800px]">
+        <Sidebar />
+        <main className="min-w-0 flex-1">{children}</main>
+      </div>
+    </div>
+  );
+}

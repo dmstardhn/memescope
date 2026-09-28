@@ -1,0 +1,538 @@
+"use client";
+
+import type {
+  RiskFlag,
+  RiskSeverity,
+  SolanaRiskReport,
+} from "@/lib/risk-types";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowUpRight,
+  CheckCircle2,
+  CircleHelp,
+  Copy,
+  ExternalLink,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+function money(value: number) {
+  if (!Number.isFinite(value)) return "$0";
+  if (value >= 1_000_000_000)
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000)
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000)
+    return `$${(value / 1_000).toFixed(1)}K`;
+  if (value >= 1)
+    return `$${value.toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    })}`;
+  return `$${value.toPrecision(5)}`;
+}
+
+function compact(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function short(address: string | null) {
+  if (!address) return "Disabled";
+  if (address.length < 14) return address;
+  return `${address.slice(0, 6)}â€¦${address.slice(-6)}`;
+}
+
+function age(minutes: number | null) {
+  if (minutes === null) return "â€”";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440)
+    return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / 1440)}d`;
+}
+
+function severityClasses(severity: RiskSeverity) {
+  if (severity === "good")
+    return "border-emerald-400/15 bg-emerald-400/5 text-emerald-200";
+  if (severity === "danger")
+    return "border-rose-400/15 bg-rose-400/5 text-rose-200";
+  if (severity === "warning")
+    return "border-amber-400/15 bg-amber-400/5 text-amber-200";
+  return "border-sky-400/15 bg-sky-400/5 text-sky-200";
+}
+
+function FlagIcon({ severity }: { severity: RiskSeverity }) {
+  if (severity === "good")
+    return <CheckCircle2 className="h-4 w-4" />;
+  if (severity === "danger")
+    return <ShieldAlert className="h-4 w-4" />;
+  if (severity === "warning")
+    return <AlertTriangle className="h-4 w-4" />;
+  return <CircleHelp className="h-4 w-4" />;
+}
+
+function AuthorityCard({
+  label,
+  authority,
+  disabled,
+}: {
+  label: string;
+  authority: string | null;
+  disabled: boolean | null;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+      <div className="text-xs uppercase tracking-[0.12em] text-zinc-600">
+        {label}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        {disabled === true ? (
+          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+        ) : disabled === false ? (
+          <AlertTriangle className="h-4 w-4 text-rose-300" />
+        ) : (
+          <CircleHelp className="h-4 w-4 text-zinc-500" />
+        )}
+        <span
+          className={
+            disabled === true
+              ? "font-medium text-emerald-300"
+              : disabled === false
+                ? "font-medium text-rose-300"
+                : "font-medium text-zinc-400"
+          }
+        >
+          {disabled === true
+            ? "Disabled"
+            : disabled === false
+              ? "Active"
+              : "Unknown"}
+        </span>
+      </div>
+      {authority ? (
+        <div className="mt-2 font-mono text-xs text-zinc-600">
+          {short(authority)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function TokenRiskPage() {
+  const params = useParams<{ address: string }>();
+  const address = params.address;
+
+  const [report, setReport] =
+    useState<SolanaRiskReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(
+    async (manual = false) => {
+      manual ? setRefreshing(true) : setLoading(true);
+
+      try {
+        const response = await fetch(
+          `/api/risk/solana/${encodeURIComponent(address)}`,
+          { cache: "no-store" },
+        );
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          throw new Error(
+            data.error || "Risk analysis failed.",
+          );
+        }
+
+        setReport(data as SolanaRiskReport);
+        setError("");
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Risk analysis failed.",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [address],
+  );
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(
+      () => load(false),
+      15_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const dangerousFlags = useMemo(
+    () =>
+      report?.flags.filter(
+        (flag) =>
+          flag.severity === "danger" ||
+          flag.severity === "warning",
+      ).length || 0,
+    [report],
+  );
+
+  async function copyAddress() {
+    await navigator.clipboard.writeText(address);
+  }
+
+  if (loading && !report) {
+    return (
+      <>
+        <div className="grid min-h-[70vh] place-items-center">
+          <div className="text-center">
+            <RefreshCw className="mx-auto h-6 w-6 animate-spin text-emerald-300" />
+            <div className="mt-3 text-sm text-zinc-500">
+              Reading Solana mint and holder dataâ€¦
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="border-b border-white/8 px-5 py-5 lg:px-8">
+        <Link
+          href="/scanner"
+          className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to scanner
+        </Link>
+
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm text-emerald-300">
+              Solana Risk Analyzer
+            </div>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-white">
+              {report?.market.name || "Token"}{" "}
+              {report?.market.symbol ? (
+                <span className="text-zinc-600">
+                  ${report.market.symbol}
+                </span>
+              ) : null}
+            </h1>
+
+            <button
+              onClick={copyAddress}
+              className="mt-2 inline-flex max-w-full items-center gap-2 font-mono text-xs text-zinc-600 hover:text-zinc-300"
+            >
+              <span className="truncate">{address}</span>
+              <Copy className="h-3.5 w-3.5 shrink-0" />
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {report?.market.dexUrl ? (
+              <a
+                href={report.market.dexUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/8 px-3 text-sm text-zinc-300 hover:bg-white/5"
+              >
+                DEX Screener
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : null}
+
+            <button
+              onClick={() => load(true)}
+              disabled={refreshing}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/8 px-3 text-sm text-zinc-300 hover:bg-white/5 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  refreshing ? "animate-spin" : ""
+                }`}
+              />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-5 p-5 lg:p-8">
+        {error ? (
+          <div className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
+
+        {report ? (
+          <>
+            <section className="grid gap-3 lg:grid-cols-[1.2fr_.8fr_.8fr_.8fr]">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">
+                <div className="text-xs uppercase tracking-[0.12em] text-zinc-600">
+                  On-chain Risk
+                </div>
+                <div className="mt-3 flex items-end gap-3">
+                  <div
+                    className={`text-5xl font-semibold tracking-tight ${
+                      report.riskLabel === "High"
+                        ? "text-rose-300"
+                        : report.riskLabel === "Moderate"
+                          ? "text-amber-300"
+                          : "text-emerald-300"
+                    }`}
+                  >
+                    {report.riskScore}
+                  </div>
+                  <div className="pb-1 text-sm text-zinc-500">
+                    / 100 Â· {report.riskLabel} risk
+                  </div>
+                </div>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/5">
+                  <div
+                    className={`h-full rounded-full ${
+                      report.riskLabel === "High"
+                        ? "bg-rose-300"
+                        : report.riskLabel === "Moderate"
+                          ? "bg-amber-300"
+                          : "bg-emerald-300"
+                    }`}
+                    style={{
+                      width: `${Math.max(
+                        2,
+                        report.riskScore,
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <div className="mt-3 text-xs text-zinc-600">
+                  {dangerousFlags} current warning/risk flag(s)
+                </div>
+              </div>
+
+              <AuthorityCard
+                label="Mint Authority"
+                authority={report.mintAuthority}
+                disabled={report.mintAuthorityDisabled}
+              />
+              <AuthorityCard
+                label="Freeze Authority"
+                authority={report.freezeAuthority}
+                disabled={report.freezeAuthorityDisabled}
+              />
+
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+                <div className="text-xs uppercase tracking-[0.12em] text-zinc-600">
+                  Token Program
+                </div>
+                <div className="mt-3 font-medium text-white">
+                  {report.tokenStandard}
+                </div>
+                <div className="mt-2 text-xs text-zinc-600">
+                  {report.decimals ?? "â€”"} decimals
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                [
+                  "Price",
+                  money(report.market.priceUsd),
+                ],
+                [
+                  "Market Cap",
+                  money(
+                    report.market.marketCap ||
+                      report.market.fdv,
+                  ),
+                ],
+                [
+                  "Liquidity",
+                  money(report.market.liquidity),
+                ],
+                [
+                  "5M Volume",
+                  money(report.market.volume5m),
+                ],
+                [
+                  "Pair Age",
+                  age(report.market.pairAgeMinutes),
+                ],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-white/8 bg-white/[0.025] p-4"
+                >
+                  <div className="text-xs uppercase tracking-[0.1em] text-zinc-600">
+                    {label}
+                  </div>
+                  <div className="mt-2 text-xl font-medium text-white">
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-[.85fr_1.15fr]">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-zinc-400" />
+                  <h2 className="font-medium text-white">
+                    Observed concentration
+                  </h2>
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-zinc-600">
+                  Based on the largest SPL token accounts
+                  returned by Solana RPC, aggregated by parsed
+                  token-account owner.
+                </p>
+
+                <div className="mt-5 grid grid-cols-3 gap-3">
+                  {[
+                    ["Top 1", report.top1Percentage],
+                    ["Top 5", report.top5Percentage],
+                    ["Top 10", report.top10Percentage],
+                  ].map(([label, value]) => (
+                    <div
+                      key={String(label)}
+                      className="rounded-xl border border-white/8 bg-black/20 p-3"
+                    >
+                      <div className="text-xs text-zinc-600">
+                        {label}
+                      </div>
+                      <div className="mt-1 text-lg font-medium text-white">
+                        {report.analyzedOwnerCount > 0
+                          ? `${(value as number).toFixed(1)}%`
+                          : "N/A"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 space-y-2">
+                  {report.topOwners.slice(0, 5).map(
+                    (owner, index) => (
+                      <div
+                        key={owner.owner}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/15 px-3 py-2.5"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs text-zinc-600">
+                            #{index + 1}
+                          </div>
+                          <div className="truncate font-mono text-xs text-zinc-400">
+                            {owner.owner}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-sm font-medium text-zinc-200">
+                          {owner.percentage.toFixed(2)}%
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+
+                <div className="mt-4 text-xs text-zinc-600">
+                  Supply: {compact(report.supply)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-zinc-400" />
+                  <h2 className="font-medium text-white">
+                    Risk checks
+                  </h2>
+                </div>
+
+                <div className="mt-5 space-y-2.5">
+                  {report.flags.map((flag: RiskFlag) => (
+                    <div
+                      key={flag.id}
+                      className={`rounded-xl border p-3 ${severityClasses(
+                        flag.severity,
+                      )}`}
+                    >
+                      <div className="flex gap-3">
+                        <div className="mt-0.5 shrink-0">
+                          <FlagIcon
+                            severity={flag.severity}
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-medium">
+                              {flag.title}
+                            </div>
+                            {flag.points > 0 ? (
+                              <div className="text-xs opacity-60">
+                                +{flag.points} risk
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs leading-5 opacity-60">
+                            {flag.description}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">
+              <h2 className="font-medium text-white">
+                Data quality & limitations
+              </h2>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {report.limitations.map((item) => (
+                  <div
+                    key={item}
+                    className="rounded-xl border border-white/5 bg-black/15 p-3 text-xs leading-5 text-zinc-600"
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-zinc-700">
+                <span>RPC: {report.rpcSource}</span>
+                <span>
+                  Updated:{" "}
+                  {new Date(
+                    report.updatedAt,
+                  ).toLocaleTimeString()}
+                </span>
+              </div>
+            </section>
+
+            <div className="rounded-2xl border border-amber-400/15 bg-amber-400/5 p-4 text-xs leading-5 text-amber-100/60">
+              This analyzer reports observable technical and
+              market risk signals. A low score does not mean a
+              token is safe, legitimate, or likely to rise in
+              price.
+            </div>
+          </>
+        ) : null}
+      </div>
+    </>
+  );
+}

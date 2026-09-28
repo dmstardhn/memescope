@@ -1,0 +1,195 @@
+"use client";
+
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  HistogramSeries,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from "lightweight-charts";
+import { useEffect, useRef } from "react";
+
+export type MemeScopeDisplayCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
+export function MemeScopeLiveChart({
+  candles,
+  seriesKey,
+  height = 350,
+}: {
+  candles: MemeScopeDisplayCandle[];
+  seriesKey: string;
+  height?: number;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const lastTimeRef = useRef<number | null>(null);
+  const countRef = useRef(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height,
+      layout: {
+        background: { type: ColorType.Solid, color: "#090b0f" },
+        textColor: "#71717a",
+        attributionLogo: true,
+      },
+      grid: {
+        vertLines: { color: "#12151b" },
+        horzLines: { color: "#12151b" },
+      },
+      rightPriceScale: {
+        borderColor: "#252932",
+        minimumWidth: 70,
+        scaleMargins: { top: 0.08, bottom: 0.22 },
+      },
+      timeScale: {
+        borderColor: "#252932",
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 4,
+        barSpacing: 7,
+      },
+      crosshair: {
+        vertLine: { color: "#52525b" },
+        horzLine: { color: "#52525b" },
+      },
+    });
+
+    chartRef.current = chart;
+
+    candleRef.current = chart.addSeries(CandlestickSeries, {
+      upColor: "#34d399",
+      downColor: "#f87171",
+      borderVisible: false,
+      wickUpColor: "#34d399",
+      wickDownColor: "#f87171",
+      priceLineVisible: true,
+      lastValueVisible: true,
+    });
+
+    volumeRef.current = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+    });
+
+    volumeRef.current.priceScale().applyOptions({
+      scaleMargins: { top: 0.78, bottom: 0 },
+    });
+
+    lastTimeRef.current = null;
+    countRef.current = 0;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) chart.applyOptions({ width: entry.contentRect.width });
+    });
+
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candleRef.current = null;
+      volumeRef.current = null;
+    };
+  }, [height, seriesKey]);
+
+  useEffect(() => {
+    const candleSeries = candleRef.current;
+    const volumeSeries = volumeRef.current;
+    const chart = chartRef.current;
+
+    if (!candleSeries || !volumeSeries || !chart) return;
+
+    const clean = candles.filter(
+      (item) =>
+        Number.isFinite(item.time) &&
+        Number.isFinite(item.open) &&
+        Number.isFinite(item.high) &&
+        Number.isFinite(item.low) &&
+        Number.isFinite(item.close) &&
+        item.open > 0 &&
+        item.high > 0 &&
+        item.low > 0 &&
+        item.close > 0,
+    );
+
+    if (clean.length === 0) {
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+      lastTimeRef.current = null;
+      countRef.current = 0;
+      return;
+    }
+
+    const last = clean[clean.length - 1];
+    const candlePoint = {
+      time: last.time as UTCTimestamp,
+      open: last.open,
+      high: last.high,
+      low: last.low,
+      close: last.close,
+    };
+    const volumePoint = {
+      time: last.time as UTCTimestamp,
+      value: last.volume,
+      color:
+        last.close >= last.open
+          ? "rgba(52, 211, 153, 0.42)"
+          : "rgba(248, 113, 113, 0.42)",
+    };
+
+    const incremental =
+      lastTimeRef.current !== null &&
+      (countRef.current === clean.length ||
+        countRef.current + 1 === clean.length) &&
+      last.time >= lastTimeRef.current;
+
+    if (incremental) {
+      candleSeries.update(candlePoint);
+      volumeSeries.update(volumePoint);
+    } else {
+      candleSeries.setData(
+        clean.map((item) => ({
+          time: item.time as UTCTimestamp,
+          open: item.open,
+          high: item.high,
+          low: item.low,
+          close: item.close,
+        })),
+      );
+      volumeSeries.setData(
+        clean.map((item) => ({
+          time: item.time as UTCTimestamp,
+          value: item.volume,
+          color:
+            item.close >= item.open
+              ? "rgba(52, 211, 153, 0.42)"
+              : "rgba(248, 113, 113, 0.42)",
+        })),
+      );
+      chart.timeScale().fitContent();
+    }
+
+    lastTimeRef.current = last.time;
+    countRef.current = clean.length;
+  }, [candles]);
+
+  return <div ref={containerRef} className="mx-auto w-full max-w-[980px]" />;
+}

@@ -1,0 +1,654 @@
+"use client";
+
+import Link from "next/link";
+import {
+  ArrowUpRight,
+  Flame,
+  Globe2,
+  Megaphone,
+  RefreshCw,
+  Rocket,
+  Search,
+  Sparkles,
+  Users,
+  Zap,
+} from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import type {
+  TerminalResponse,
+  TerminalToken,
+} from "@/lib/terminal-types";
+
+type DiscoveryMode =
+  | "new"
+  | "trending"
+  | "spike"
+  | "gainers"
+  | "boosted"
+  | "takeover";
+
+function money(value: number | null) {
+  if (
+    value === null ||
+    !Number.isFinite(value)
+  ) {
+    return "â€”";
+  }
+
+  if (value >= 1_000_000_000) {
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `$${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return `$${value.toFixed(2)}`;
+}
+
+function age(minutes: number | null) {
+  if (minutes === null) return "â€”";
+
+  if (minutes < 60) {
+    return `${Math.floor(minutes)}m`;
+  }
+
+  if (minutes < 1_440) {
+    return `${Math.floor(
+      minutes / 60,
+    )}h`;
+  }
+
+  return `${Math.floor(
+    minutes / 1_440,
+  )}d`;
+}
+
+function pct(value: number | null) {
+  if (value === null) return "â€”";
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(
+    1,
+  )}%`;
+}
+
+function sortTokens(
+  mode: DiscoveryMode,
+  tokens: TerminalToken[],
+) {
+  const output = [...tokens];
+
+  if (mode === "new") {
+    return output.sort(
+      (a, b) =>
+        (a.pairAgeMinutes ??
+          Number.POSITIVE_INFINITY) -
+        (b.pairAgeMinutes ??
+          Number.POSITIVE_INFINITY),
+    );
+  }
+
+  if (mode === "spike") {
+    return output.sort(
+      (a, b) =>
+        (b.volumeSpike5m ?? -1) -
+        (a.volumeSpike5m ?? -1),
+    );
+  }
+
+  if (mode === "gainers") {
+    return output.sort(
+      (a, b) =>
+        (b.priceChange.m5 ?? -9999) -
+        (a.priceChange.m5 ?? -9999),
+    );
+  }
+
+  if (mode === "boosted") {
+    return output
+      .filter(
+        (token) =>
+          token.boostsActive > 0 ||
+          token.sources.boostedLatest ||
+          token.sources.boostedTop,
+      )
+      .sort(
+        (a, b) =>
+          b.boostsActive -
+            a.boostsActive ||
+          b.activityScore -
+            a.activityScore,
+      );
+  }
+
+  if (mode === "takeover") {
+    return output
+      .filter(
+        (token) =>
+          token.sources
+            .communityTakeover,
+      )
+      .sort(
+        (a, b) =>
+          b.activityScore -
+          a.activityScore,
+      );
+  }
+
+  return output.sort(
+    (a, b) =>
+      b.activityScore -
+      a.activityScore,
+  );
+}
+
+function TokenCard({
+  token,
+}: {
+  token: TerminalToken;
+}) {
+  const buys = token.txns.m5.buys;
+  const sells = token.txns.m5.sells;
+  const total = buys + sells;
+
+  const buyShare =
+    total > 0
+      ? Math.round(
+          (buys / total) * 100,
+        )
+      : null;
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.025] p-4 transition hover:border-white/15 hover:bg-white/[0.035]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {token.imageUrl ? (
+            <img
+              src={token.imageUrl}
+              alt=""
+              className="h-11 w-11 shrink-0 rounded-full border border-white/10 object-cover"
+            />
+          ) : (
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/20 text-xs font-bold text-zinc-500">
+              {token.symbol.slice(0, 2)}
+            </div>
+          )}
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/token/${token.address}`}
+                className="truncate text-base font-semibold text-white hover:text-emerald-300"
+              >
+                {token.symbol}
+              </Link>
+
+              {token.sources
+                .communityTakeover && (
+                <span className="rounded bg-violet-400/10 px-1.5 py-0.5 text-[9px] text-violet-300">
+                  CTO
+                </span>
+              )}
+
+              {token.boostsActive >
+                0 && (
+                <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] text-amber-300">
+                  BOOST
+                </span>
+              )}
+            </div>
+
+            <div className="truncate text-xs text-zinc-600">
+              {token.name}
+            </div>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div
+            className={`text-xl font-semibold ${
+              token.activityScore >= 70
+                ? "text-emerald-300"
+                : token.activityScore >= 45
+                  ? "text-amber-300"
+                  : "text-zinc-400"
+            }`}
+          >
+            {token.activityScore}
+          </div>
+
+          <div className="text-[9px] uppercase tracking-[0.13em] text-zinc-700">
+            activity
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="rounded-xl bg-black/20 p-2.5">
+          <div className="text-[10px] text-zinc-600">
+            Age
+          </div>
+          <div className="mt-1 text-xs font-medium text-zinc-200">
+            {age(
+              token.pairAgeMinutes,
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-black/20 p-2.5">
+          <div className="text-[10px] text-zinc-600">
+            MC
+          </div>
+          <div className="mt-1 text-xs font-medium text-zinc-200">
+            {money(
+              token.marketCap ??
+                token.fdv,
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-black/20 p-2.5">
+          <div className="text-[10px] text-zinc-600">
+            Liquidity
+          </div>
+          <div className="mt-1 text-xs font-medium text-zinc-200">
+            {money(
+              token.liquidityUsd,
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+        <div>
+          <div className="text-[9px] text-zinc-700">
+            5m
+          </div>
+          <div
+            className={`mt-1 text-xs ${
+              (token.priceChange.m5 ??
+                0) >= 0
+                ? "text-emerald-300"
+                : "text-red-300"
+            }`}
+          >
+            {pct(
+              token.priceChange.m5,
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[9px] text-zinc-700">
+            Vol 5m
+          </div>
+          <div className="mt-1 text-xs text-zinc-300">
+            {money(
+              token.volume.m5,
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[9px] text-zinc-700">
+            Spike
+          </div>
+          <div className="mt-1 text-xs text-amber-300">
+            {token.volumeSpike5m !==
+            null
+              ? `${token.volumeSpike5m.toFixed(
+                  1,
+                )}x`
+              : "â€”"}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[9px] text-zinc-700">
+            Buy %
+          </div>
+          <div className="mt-1 text-xs text-zinc-300">
+            {buyShare !== null
+              ? `${buyShare}%`
+              : "â€”"}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {token.sources.latestProfile && (
+          <span className="rounded-full border border-white/5 px-2 py-1 text-[9px] text-zinc-500">
+            new profile
+          </span>
+        )}
+
+        {token.sources.recentUpdate && (
+          <span className="rounded-full border border-white/5 px-2 py-1 text-[9px] text-zinc-500">
+            updated
+          </span>
+        )}
+
+        {token.sources.advertised && (
+          <span className="rounded-full border border-white/5 px-2 py-1 text-[9px] text-zinc-500">
+            ad
+          </span>
+        )}
+
+        {token.socials
+          .slice(0, 2)
+          .map((social, index) => (
+            <span
+              key={`${token.address}-${social.platform}-${social.handle || index}`}
+              className="rounded-full border border-white/5 px-2 py-1 text-[9px] text-zinc-600"
+            >
+              {social.platform}
+            </span>
+          ))}
+
+        {token.websites.length >
+          0 && (
+          <span className="rounded-full border border-white/5 px-2 py-1 text-[9px] text-zinc-600">
+            website
+          </span>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <div className="text-[10px] text-zinc-700">
+          {token.dexId}
+        </div>
+
+        <div className="flex gap-2">
+          <Link
+            href={`/token/${token.address}`}
+            className="rounded-lg border border-emerald-400/15 bg-emerald-400/[0.06] px-2.5 py-1.5 text-[10px] text-emerald-300"
+          >
+            Analyze
+          </Link>
+
+          {token.dexUrl && (
+            <a
+              href={token.dexUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-white/10 p-1.5 text-zinc-500 hover:text-white"
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export default function DiscoverPage() {
+  const [data, setData] =
+    useState<TerminalResponse | null>(
+      null,
+    );
+
+  const [mode, setMode] =
+    useState<DiscoveryMode>(
+      "trending",
+    );
+
+  const [query, setQuery] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  async function load(
+    silent = false,
+  ) {
+    if (!silent) setLoading(true);
+
+    try {
+      const response = await fetch(
+        "/api/terminal/solana",
+        {
+          cache: "no-store",
+        },
+      );
+
+      const result =
+        (await response.json()) as
+          | TerminalResponse
+          | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error
+            : "Discover failed.",
+        );
+      }
+
+      setData(
+        result as TerminalResponse,
+      );
+
+      setError("");
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Discover failed.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+
+    const timer = window.setInterval(
+      () => {
+        void load(true);
+      },
+      15_000,
+    );
+
+    return () =>
+      window.clearInterval(timer);
+  }, []);
+
+  const visible = useMemo(() => {
+    const needle =
+      query.trim().toLowerCase();
+
+    const base = (data?.tokens ?? []).filter(
+      (token) =>
+        !needle ||
+        token.symbol
+          .toLowerCase()
+          .includes(needle) ||
+        token.name
+          .toLowerCase()
+          .includes(needle) ||
+        token.address
+          .toLowerCase()
+          .includes(needle),
+    );
+
+    return sortTokens(
+      mode,
+      base,
+    ).slice(0, 48);
+  }, [data, mode, query]);
+
+  const modes: Array<{
+    id: DiscoveryMode;
+    label: string;
+    icon: typeof Flame;
+  }> = [
+    {
+      id: "trending",
+      label: "Trending",
+      icon: Flame,
+    },
+    {
+      id: "new",
+      label: "New",
+      icon: Sparkles,
+    },
+    {
+      id: "spike",
+      label: "Volume Spike",
+      icon: Zap,
+    },
+    {
+      id: "gainers",
+      label: "Gainers",
+      icon: Rocket,
+    },
+    {
+      id: "boosted",
+      label: "Boosted",
+      icon: Megaphone,
+    },
+    {
+      id: "takeover",
+      label: "Community Takeover",
+      icon: Users,
+    },
+  ];
+
+  return (
+    <main className="mx-auto w-full max-w-[1700px] px-4 py-6 lg:px-7">
+      <section className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-emerald-300">
+            <Globe2 className="h-3.5 w-3.5" />
+            Solana discovery engine
+          </div>
+
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+            Discover
+          </h1>
+
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
+            New profiles, updated tokens,
+            boosts, community takeovers,
+            gainers and abnormal 5-minute
+            activity in one board.
+          </p>
+        </div>
+
+        <button
+          onClick={() =>
+            void load()
+          }
+          disabled={loading}
+          className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5"
+        >
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${
+              loading
+                ? "animate-spin"
+                : ""
+            }`}
+          />
+          Refresh
+        </button>
+      </section>
+
+      <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+
+          <input
+            value={query}
+            onChange={(event) =>
+              setQuery(
+                event.target.value,
+              )
+            }
+            placeholder="Search tokens"
+            className="w-full rounded-xl border border-white/10 bg-black/25 py-3 pl-10 pr-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-emerald-400/30"
+          />
+        </div>
+
+        <div className="mt-3 flex gap-1 overflow-x-auto">
+          {modes.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() =>
+                  setMode(item.id)
+                }
+                className={`flex whitespace-nowrap items-center gap-2 rounded-xl px-3 py-2 text-xs transition ${
+                  mode === item.id
+                    ? "bg-white text-black"
+                    : "text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {error && (
+        <div className="mb-5 rounded-xl border border-red-400/20 bg-red-400/[0.05] p-3 text-sm text-red-200">
+          {error}
+        </div>
+      )}
+
+      {loading && !data ? (
+        <div className="flex min-h-[400px] items-center justify-center gap-2 rounded-2xl border border-white/10 text-sm text-zinc-500">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Loading discovery feedâ€¦
+        </div>
+      ) : (
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {visible.map((token) => (
+            <TokenCard
+              key={token.address}
+              token={token}
+            />
+          ))}
+        </section>
+      )}
+
+      {!loading &&
+        visible.length === 0 && (
+          <div className="rounded-2xl border border-white/10 p-12 text-center text-sm text-zinc-600">
+            Nothing found in this category.
+          </div>
+        )}
+
+      <div className="mt-5 flex flex-wrap justify-between gap-2 text-[10px] text-zinc-700">
+        <span>
+          {visible.length} cards visible Â·{" "}
+          {data?.tokenCount ?? 0} tokens
+          loaded
+        </span>
+
+        <span>
+          Volume Spike compares current 5m
+          volume with the 1h average 5m
+          pace.
+        </span>
+      </div>
+    </main>
+  );
+}

@@ -1,0 +1,97 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { TokenMarketTerminal } from "@/components/token-market-terminal";
+
+export function TokenQuickView() {
+  const [address, setAddress] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const anchor = target.closest("a") as HTMLAnchorElement | null;
+      if (!anchor || anchor.dataset.nativeTerminalFull === "true") return;
+
+      let url: URL;
+      try {
+        url = new URL(anchor.href, window.location.origin);
+      } catch {
+        return;
+      }
+
+      if (url.origin !== window.location.origin) return;
+
+      const match = url.pathname.match(/^\/token\/([^/]+)\/?$/);
+      if (!match) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setAddress(decodeURIComponent(match[1]));
+    };
+
+    const onCustom = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail) setAddress(detail);
+    };
+
+    document.addEventListener("click", onClick, true);
+    window.addEventListener("memescope:open-token", onCustom as EventListener);
+
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      window.removeEventListener("memescope:open-token", onCustom as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!address) return;
+
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddress(null);
+    };
+
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [address]);
+
+  if (!address) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-2 backdrop-blur-sm lg:p-5"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) setAddress(null);
+      }}
+    >
+      <div className="w-full max-w-[1280px]">
+        <TokenMarketTerminal
+          key={address}
+          address={address}
+          mode="modal"
+          onClose={() => setAddress(null)}
+        />
+      </div>
+    </div>
+  );
+}

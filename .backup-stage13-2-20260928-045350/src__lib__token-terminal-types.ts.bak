@@ -1,0 +1,96 @@
+export type TokenTerminalTimeframe =
+  | "1m"
+  | "5m"
+  | "15m"
+  | "1h"
+  | "4h"
+  | "1d";
+
+export type TokenTerminalCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
+export type TokenTerminalPool = {
+  address: string;
+  name: string;
+  dexName: string;
+  tokenSide: "base" | "quote";
+  priceUsd: number | null;
+  liquidityUsd: number;
+  marketCapUsd: number | null;
+  fdvUsd: number | null;
+  createdAt: number | null;
+
+  priceChange: {
+    m5: number | null;
+    h1: number | null;
+    h6: number | null;
+    h24: number | null;
+  };
+
+  volume: {
+    m5: number;
+    h1: number;
+    h6: number;
+    h24: number;
+  };
+
+  txns: {
+    m5: {
+      buys: number;
+      sells: number;
+    };
+    h1: {
+      buys: number;
+      sells: number;
+    };
+    h24: {
+      buys: number;
+      sells: number;
+    };
+  };
+};
+
+export type TokenTerminalTrade = {
+  txHash: string;
+  timestamp: number;
+  kind: "buy" | "sell" | "unknown";
+  volumeUsd: number;
+  priceUsd: number | null;
+  fromAmount: number | null;
+  toAmount: number | null;
+  maker: string | null;
+};
+
+export type TokenTerminalMeta = {
+  address: string;
+  name: string;
+  symbol: string;
+  imageUrl: string | null;
+  description: string | null;
+  websites: string[];
+  twitter: string | null;
+  telegram: string | null;
+  discord: string | null;
+};
+
+export type TokenTerminalResponse = {
+  generatedAt: number;
+  network: "solana";
+  timeframe: TokenTerminalTimeframe;
+  token: TokenTerminalMeta;
+  selectedPool: TokenTerminalPool;
+  pools: TokenTerminalPool[];
+  candles: TokenTerminalCandle[];
+  trades: TokenTerminalTrade[];
+  source: {
+    market: "GeckoTerminal" | "DexScreener fallback";
+    onchain: "MemeScope/Helius";
+  };
+  warnings: string[];
+};

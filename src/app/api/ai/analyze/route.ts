@@ -1,0 +1,326 @@
+import { NextRequest, NextResponse } from "next/server";
+import type { AIAnalysisResponse } from "@/lib/ai-types";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type RiskReport = {
+  ok: boolean;
+  tokenAddress: string;
+  tokenStandard: string;
+  mintAuthorityDisabled: boolean | null;
+  freezeAuthorityDisabled: boolean | null;
+  top1Percentage: number;
+  top10Percentage: number;
+  analyzedOwnerCount: number;
+  riskScore: number;
+  riskLabel: string;
+  flags: Array<{
+    title: string;
+    description: string;
+    severity: string;
+    points: number;
+  }>;
+  market: {
+    name: string | null;
+    symbol: string | null;
+    priceUsd: number;
+    marketCap: number;
+    fdv: number;
+    liquidity: number;
+    liquidityToMarketCap: number | null;
+    volume5m: number;
+    buys5m: number;
+    sells5m: number;
+    pairAgeMinutes: number | null;
+  };
+};
+
+function validAddress(address: string) {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+}
+
+function compactMoney(value: number) {
+  if (!Number.isFinite(value)) return "$0";
+  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(2)}`;
+}
+
+function localAnalysis(report: RiskReport): AIAnalysisResponse {
+  const strengths: string[] = [];
+  const risks: string[] = [];
+  const watch: string[] = [];
+  const market = report.market;
+
+  if (report.mintAuthorityDisabled === true) {
+    strengths.push("Mint authority is disabled.");
+  } else if (report.mintAuthorityDisabled === false) {
+    risks.push("Mint authority is still active.");
+  }
+
+  if (report.freezeAuthorityDisabled === true) {
+    strengths.push("Freeze authority is disabled.");
+  } else if (report.freezeAuthorityDisabled === false) {
+    risks.push("Freeze authority is still active.");
+  }
+
+  if (report.analyzedOwnerCount <= 0) {
+    watch.push(
+      "Holder concentration data is unavailable for this mint, so no holder-distribution conclusion is made.",
+    );
+  } else if (report.top10Percentage <= 25) {
+    strengths.push(`Observed top-10 concentration is relatively distributed at ${report.top10Percentage.toFixed(1)}%.`);
+  } else if (report.top10Percentage >= 40) {
+    risks.push(`Observed top-10 concentration is elevated at ${report.top10Percentage.toFixed(1)}%.`);
+  } else {
+    watch.push(`Top-10 concentration is ${report.top10Percentage.toFixed(1)}%; inspect owner types before drawing conclusions.`);
+  }
+
+  if ((market.liquidityToMarketCap ?? 0) >= 0.15) {
+    strengths.push("Liquidity is comparatively healthy versus market cap/FDV.");
+  } else if (market.liquidityToMarketCap !== null && market.liquidityToMarketCap < 0.08) {
+    risks.push("Liquidity is thin relative to market cap/FDV.");
+  }
+
+  const total5m = market.buys5m + market.sells5m;
+  const buyShare = total5m > 0 ? market.buys5m / total5m : 0.5;
+
+  if (market.buys5m > market.sells5m * 1.5 && total5m >= 10) {
+    strengths.push(`Recent order flow is buy-heavy (${market.buys5m} buys vs ${market.sells5m} sells).`);
+  } else if (market.sells5m > market.buys5m * 1.5 && total5m >= 10) {
+    risks.push(`Recent order flow is sell-heavy (${market.buys5m} buys vs ${market.sells5m} sells).`);
+  } else {
+    watch.push(`Recent buy share is ${(buyShare * 100).toFixed(0)}%; monitor whether flow accelerates or reverses.`);
+  }
+
+  if ((market.pairAgeMinutes ?? 999999) < 120) {
+    risks.push("The trading pair is very new, so market structure can change quickly.");
+  }
+
+  if (market.volume5m > 0 && market.liquidity > 0) {
+    const turnover = market.volume5m / market.liquidity;
+    if (turnover > 1) {
+      watch.push("5-minute turnover is high relative to liquidity; expect elevated slippage and volatility.");
+    }
+  }
+
+  for (const flag of report.flags) {
+    if ((flag.severity === "danger" || flag.severity === "warning") && risks.length < 6) {
+      if (!risks.some((item) => item.toLowerCase().includes(flag.title.toLowerCase()))) {
+        risks.push(flag.description);
+      }
+    }
+  }
+
+  const symbol = market.symbol || "TOKEN";
+  const headline =
+    report.riskScore >= 61
+      ? `${symbol}: high technical risk`
+      : report.riskScore >= 31
+        ? `${symbol}: mixed setup, verify carefully`
+        : `${symbol}: lower observed technical risk`;
+
+  const summary = `${symbol} currently shows a risk score of ${report.riskScore}/100, ${compactMoney(market.liquidity)} liquidity, ${compactMoney(market.marketCap || market.fdv)} market cap/FDV, and ${market.buys5m}/${market.sells5m} buys/sells over 5 minutes.`;
+
+  const verdict =
+    report.riskScore >= 61
+      ? "Several observable risk signals are active. Treat the token as high-risk until the flagged items are independently verified."
+      : report.riskScore >= 31
+        ? "The token has both positive and cautionary signals. Further wallet, liquidity, and launch-history checks are warranted."
+        : "The currently observed checks are comparatively cleaner, but this does not establish legitimacy or future performance.";
+
+  return {
+    ok: true,
+    mode: "local",
+    model: null,
+    tokenAddress: report.tokenAddress,
+    symbol: market.symbol,
+    name: market.name,
+    headline,
+    summary,
+    strengths: strengths.slice(0, 5),
+    risks: risks.slice(0, 6),
+    watch: watch.slice(0, 5),
+    verdict,
+    generatedAt: Date.now(),
+    disclaimer: "Analytical summary only. Not investment advice and not a prediction of future price."
+  };
+}
+
+function extractOutputText(data: any): string {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const chunks: string[] = [];
+
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      if (part?.type === "output_text" && typeof part?.text === "string") {
+        chunks.push(part.text);
+      }
+    }
+  }
+
+  return chunks.join("\n").trim();
+}
+
+function parseJsonObject(text: string) {
+  const cleaned = text
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  return JSON.parse(cleaned);
+}
+
+async function openAIAnalysis(
+  report: RiskReport,
+  apiKey: string,
+  model: string,
+): Promise<AIAnalysisResponse | null> {
+  const prompt = {
+    tokenAddress: report.tokenAddress,
+    tokenStandard: report.tokenStandard,
+    mintAuthorityDisabled: report.mintAuthorityDisabled,
+    freezeAuthorityDisabled: report.freezeAuthorityDisabled,
+    top1Percentage: report.top1Percentage,
+    top10Percentage: report.top10Percentage,
+    analyzedOwnerCount: report.analyzedOwnerCount,
+    riskScore: report.riskScore,
+    riskLabel: report.riskLabel,
+    market: report.market,
+    riskFlags: report.flags.map((flag) => ({
+      title: flag.title,
+      severity: flag.severity,
+      points: flag.points,
+      description: flag.description,
+    })),
+  };
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      reasoning: { effort: "low" },
+      max_output_tokens: 1200,
+      instructions:
+        "You are a neutral crypto market-data analyst. Explain only the supplied observable data. Do not predict price, promise returns, tell the user to buy/sell, or invent missing facts. Return strict JSON only with keys headline, summary, strengths, risks, watch, verdict. strengths/risks/watch must be arrays of short strings.",
+      input: JSON.stringify(prompt),
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = await response.json();
+  const text = extractOutputText(data);
+
+  if (!text) return null;
+
+  try {
+    const parsed = parseJsonObject(text);
+
+    return {
+      ok: true,
+      mode: "openai",
+      model,
+      tokenAddress: report.tokenAddress,
+      symbol: report.market.symbol,
+      name: report.market.name,
+      headline: String(parsed.headline || "Token analysis"),
+      summary: String(parsed.summary || ""),
+      strengths: Array.isArray(parsed.strengths)
+        ? parsed.strengths.map(String).slice(0, 6)
+        : [],
+      risks: Array.isArray(parsed.risks)
+        ? parsed.risks.map(String).slice(0, 7)
+        : [],
+      watch: Array.isArray(parsed.watch)
+        ? parsed.watch.map(String).slice(0, 6)
+        : [],
+      verdict: String(parsed.verdict || ""),
+      generatedAt: Date.now(),
+      disclaimer:
+        "AI-generated analytical summary of supplied market/on-chain data. Not investment advice or a price prediction.",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  let body: { address?: string };
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  const address = body.address?.trim() || "";
+
+  if (!validAddress(address)) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid Solana token mint address." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const riskResponse = await fetch(
+      `${request.nextUrl.origin}/api/risk/solana/${encodeURIComponent(address)}`,
+      { cache: "no-store" },
+    );
+
+    const report = (await riskResponse.json()) as RiskReport & {
+      error?: string;
+    };
+
+    if (!riskResponse.ok || !report.ok) {
+      throw new Error(report.error || "Risk data unavailable.");
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    const model =
+      process.env.OPENAI_MODEL?.trim() || "gpt-5.6-luna";
+
+    if (apiKey) {
+      const ai = await openAIAnalysis(report, apiKey, model);
+      if (ai) {
+        return NextResponse.json(ai, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
+    }
+
+    return NextResponse.json(localAnalysis(report), {
+      headers: { "Cache-Control": "no-store" },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Analysis failed.",
+      },
+      { status: 502 },
+    );
+  }
+}

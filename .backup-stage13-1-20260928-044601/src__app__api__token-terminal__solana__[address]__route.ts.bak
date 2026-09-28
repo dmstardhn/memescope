@@ -1,0 +1,842 @@
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
+
+import type {
+  TokenTerminalCandle,
+  TokenTerminalMeta,
+  TokenTerminalPool,
+  TokenTerminalResponse,
+  TokenTerminalTimeframe,
+  TokenTerminalTrade,
+} from "@/lib/token-terminal-types";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const GT =
+  "https://api.geckoterminal.com/api/v2";
+
+const GT_HEADERS = {
+  Accept:
+    "application/json;version=20230203",
+};
+
+type JsonRecord = Record<
+  string,
+  unknown
+>;
+
+type GtResource = {
+  id?: string;
+  type?: string;
+  attributes?: JsonRecord;
+  relationships?: JsonRecord;
+};
+
+type CacheItem = {
+  expiresAt: number;
+  payload: TokenTerminalResponse;
+};
+
+const cache = new Map<
+  string,
+  CacheItem
+>();
+
+function isSolanaAddress(
+  value: string,
+) {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(
+    value,
+  );
+}
+
+function numberValue(
+  value: unknown,
+  fallback = 0,
+) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
+}
+
+function nullableNumber(
+  value: unknown,
+) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
+function stringValue(
+  value: unknown,
+) {
+  return typeof value === "string"
+    ? value
+    : "";
+}
+
+function objectValue(
+  value: unknown,
+): JsonRecord {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
+
+function arrayValue(
+  value: unknown,
+) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function relationId(
+  relationships: JsonRecord,
+  key: string,
+) {
+  const relation = objectValue(
+    relationships[key],
+  );
+
+  const data = objectValue(
+    relation.data,
+  );
+
+  return stringValue(data.id);
+}
+
+function parseTimeframe(
+  value: string | null,
+): TokenTerminalTimeframe {
+  if (
+    value === "1m" ||
+    value === "5m" ||
+    value === "15m" ||
+    value === "1h" ||
+    value === "4h" ||
+    value === "1d"
+  ) {
+    return value;
+  }
+
+  return "5m";
+}
+
+function timeframeParams(
+  timeframe: TokenTerminalTimeframe,
+) {
+  if (timeframe === "1m") {
+    return {
+      path: "minute",
+      aggregate: "1",
+    };
+  }
+
+  if (timeframe === "5m") {
+    return {
+      path: "minute",
+      aggregate: "5",
+    };
+  }
+
+  if (timeframe === "15m") {
+    return {
+      path: "minute",
+      aggregate: "15",
+    };
+  }
+
+  if (timeframe === "1h") {
+    return {
+      path: "hour",
+      aggregate: "1",
+    };
+  }
+
+  if (timeframe === "4h") {
+    return {
+      path: "hour",
+      aggregate: "4",
+    };
+  }
+
+  return {
+    path: "day",
+    aggregate: "1",
+  };
+}
+
+async function gtFetch(
+  path: string,
+  warnings: string[],
+) {
+  try {
+    const response = await fetch(
+      `${GT}${path}`,
+      {
+        headers: GT_HEADERS,
+        cache: "no-store",
+      },
+    );
+
+    if (!response.ok) {
+      warnings.push(
+        `GeckoTerminal ${response.status}: ${path}`,
+      );
+
+      return null;
+    }
+
+    return (await response.json()) as JsonRecord;
+  } catch (error) {
+    warnings.push(
+      error instanceof Error
+        ? error.message
+        : `Failed: ${path}`,
+    );
+
+    return null;
+  }
+}
+
+function parsePool(
+  resource: GtResource,
+  tokenAddress: string,
+): TokenTerminalPool | null {
+  const attributes = objectValue(
+    resource.attributes,
+  );
+
+  const relationships = objectValue(
+    resource.relationships,
+  );
+
+  const address = stringValue(
+    attributes.address,
+  );
+
+  if (!address) {
+    return null;
+  }
+
+  const baseId = relationId(
+    relationships,
+    "base_token",
+  );
+
+  const quoteId = relationId(
+    relationships,
+    "quote_token",
+  );
+
+  const tokenSide:
+    | "base"
+    | "quote" =
+    quoteId.toLowerCase().endsWith(
+      tokenAddress.toLowerCase(),
+    )
+      ? "quote"
+      : "base";
+
+  const priceUsd =
+    tokenSide === "base"
+      ? nullableNumber(
+          attributes.base_token_price_usd,
+        )
+      : nullableNumber(
+          attributes.quote_token_price_usd,
+        );
+
+  const priceChanges =
+    objectValue(
+      attributes.price_change_percentage,
+    );
+
+  const volume =
+    objectValue(
+      attributes.volume_usd,
+    );
+
+  const transactions =
+    objectValue(
+      attributes.transactions,
+    );
+
+  function tx(
+    key: string,
+  ) {
+    const item = objectValue(
+      transactions[key],
+    );
+
+    return {
+      buys: numberValue(item.buys),
+      sells: numberValue(item.sells),
+    };
+  }
+
+  const createdAtRaw =
+    stringValue(
+      attributes.pool_created_at,
+    );
+
+  const createdAt =
+    createdAtRaw &&
+    Number.isFinite(
+      Date.parse(createdAtRaw),
+    )
+      ? Date.parse(createdAtRaw)
+      : null;
+
+  const dexRelation =
+    objectValue(
+      relationships.dex,
+    );
+
+  const dexData =
+    objectValue(dexRelation.data);
+
+  const dexId =
+    stringValue(dexData.id);
+
+  return {
+    address,
+    name:
+      stringValue(
+        attributes.name,
+      ) || "Unknown pool",
+
+    dexName:
+      dexId
+        .replace(/^solana_/, "")
+        .replace(/_/g, " ") ||
+      "unknown",
+
+    tokenSide,
+    priceUsd,
+    liquidityUsd: numberValue(
+      attributes.reserve_in_usd,
+    ),
+
+    marketCapUsd:
+      nullableNumber(
+        attributes.market_cap_usd,
+      ),
+
+    fdvUsd:
+      nullableNumber(
+        attributes.fdv_usd,
+      ),
+
+    createdAt,
+
+    priceChange: {
+      m5: nullableNumber(
+        priceChanges.m5,
+      ),
+      h1: nullableNumber(
+        priceChanges.h1,
+      ),
+      h6: nullableNumber(
+        priceChanges.h6,
+      ),
+      h24: nullableNumber(
+        priceChanges.h24,
+      ),
+    },
+
+    volume: {
+      m5: numberValue(volume.m5),
+      h1: numberValue(volume.h1),
+      h6: numberValue(volume.h6),
+      h24: numberValue(volume.h24),
+    },
+
+    txns: {
+      m5: tx("m5"),
+      h1: tx("h1"),
+      h24: tx("h24"),
+    },
+  };
+}
+
+function parseInfo(
+  json: JsonRecord | null,
+  address: string,
+): TokenTerminalMeta {
+  const data = objectValue(
+    json?.data,
+  );
+
+  const attributes =
+    objectValue(data.attributes);
+
+  const websites = arrayValue(
+    attributes.websites,
+  )
+    .map((item) => {
+      if (typeof item === "string") {
+        return item;
+      }
+
+      const row = objectValue(item);
+      return stringValue(row.url);
+    })
+    .filter(Boolean);
+
+  return {
+    address,
+
+    name:
+      stringValue(attributes.name) ||
+      "Unknown token",
+
+    symbol:
+      stringValue(attributes.symbol) ||
+      "UNKNOWN",
+
+    imageUrl:
+      stringValue(
+        attributes.image_url,
+      ) || null,
+
+    description:
+      stringValue(
+        attributes.description,
+      ) || null,
+
+    websites,
+
+    twitter:
+      stringValue(
+        attributes.twitter_handle,
+      ) || null,
+
+    telegram:
+      stringValue(
+        attributes.telegram_handle,
+      ) || null,
+
+    discord:
+      stringValue(
+        attributes.discord_url,
+      ) || null,
+  };
+}
+
+function parseCandles(
+  json: JsonRecord | null,
+): TokenTerminalCandle[] {
+  const data = objectValue(
+    json?.data,
+  );
+
+  const attributes =
+    objectValue(data.attributes);
+
+  const rows = arrayValue(
+    attributes.ohlcv_list,
+  );
+
+  const candles: TokenTerminalCandle[] =
+    [];
+
+  for (const row of rows) {
+    if (!Array.isArray(row)) {
+      continue;
+    }
+
+    const [
+      timestamp,
+      open,
+      high,
+      low,
+      close,
+      volume,
+    ] = row;
+
+    const candle = {
+      time: numberValue(timestamp),
+      open: numberValue(open),
+      high: numberValue(high),
+      low: numberValue(low),
+      close: numberValue(close),
+      volume: numberValue(volume),
+    };
+
+    if (
+      candle.time > 0 &&
+      candle.open > 0 &&
+      candle.high > 0 &&
+      candle.low > 0 &&
+      candle.close > 0
+    ) {
+      candles.push(candle);
+    }
+  }
+
+  return candles.sort(
+    (a, b) => a.time - b.time,
+  );
+}
+
+function parseTrades(
+  json: JsonRecord | null,
+  tokenAddress: string,
+): TokenTerminalTrade[] {
+  const data = arrayValue(
+    json?.data,
+  );
+
+  const trades: TokenTerminalTrade[] =
+    [];
+
+  for (const raw of data) {
+    const resource =
+      objectValue(raw);
+
+    const attributes =
+      objectValue(
+        resource.attributes,
+      );
+
+    const kindRaw =
+      stringValue(
+        attributes.kind,
+      ).toLowerCase();
+
+    const kind:
+      | "buy"
+      | "sell"
+      | "unknown" =
+      kindRaw === "buy"
+        ? "buy"
+        : kindRaw === "sell"
+          ? "sell"
+          : "unknown";
+
+    const timestampRaw =
+      stringValue(
+        attributes.block_timestamp,
+      );
+
+    const timestamp =
+      timestampRaw &&
+      Number.isFinite(
+        Date.parse(timestampRaw),
+      )
+        ? Date.parse(timestampRaw)
+        : Date.now();
+
+    const fromAddress =
+      stringValue(
+        attributes.from_token_address,
+      );
+
+    const toAddress =
+      stringValue(
+        attributes.to_token_address,
+      );
+
+    let priceUsd: number | null =
+      null;
+
+    if (
+      fromAddress ===
+      tokenAddress
+    ) {
+      priceUsd =
+        nullableNumber(
+          attributes.price_from_in_usd,
+        );
+    } else if (
+      toAddress === tokenAddress
+    ) {
+      priceUsd =
+        nullableNumber(
+          attributes.price_to_in_usd,
+        );
+    } else {
+      priceUsd =
+        nullableNumber(
+          attributes.price_to_in_usd,
+        ) ??
+        nullableNumber(
+          attributes.price_from_in_usd,
+        );
+    }
+
+    trades.push({
+      txHash:
+        stringValue(
+          attributes.tx_hash,
+        ),
+
+      timestamp,
+
+      kind,
+
+      volumeUsd:
+        numberValue(
+          attributes.volume_in_usd,
+        ),
+
+      priceUsd,
+
+      fromAmount:
+        nullableNumber(
+          attributes.from_token_amount,
+        ),
+
+      toAmount:
+        nullableNumber(
+          attributes.to_token_amount,
+        ),
+
+      maker:
+        stringValue(
+          attributes.tx_from_address,
+        ) || null,
+    });
+  }
+
+  return trades
+    .sort(
+      (a, b) =>
+        b.timestamp -
+        a.timestamp,
+    )
+    .slice(0, 100);
+}
+
+async function getOhlcv(
+  poolAddress: string,
+  tokenAddress: string,
+  timeframe: TokenTerminalTimeframe,
+  warnings: string[],
+) {
+  const mapped =
+    timeframeParams(timeframe);
+
+  const query =
+    `?aggregate=${mapped.aggregate}` +
+    `&limit=240` +
+    `&currency=usd` +
+    `&token=${encodeURIComponent(
+      tokenAddress,
+    )}`;
+
+  const primary = await gtFetch(
+    `/networks/solana/pools/${poolAddress}/ohlcv/${mapped.path}${query}`,
+    warnings,
+  );
+
+  const primaryCandles =
+    parseCandles(primary);
+
+  if (primaryCandles.length > 0) {
+    return primaryCandles;
+  }
+
+  const fallback = await gtFetch(
+    `/networks/solana/pools/${poolAddress}/ohlcv/${mapped.path}?aggregate=${mapped.aggregate}&limit=240&currency=usd`,
+    warnings,
+  );
+
+  return parseCandles(
+    fallback,
+  );
+}
+
+export async function GET(
+  request: NextRequest,
+  context: {
+    params: Promise<{
+      address: string;
+    }>;
+  },
+) {
+  const { address } =
+    await context.params;
+
+  if (!isSolanaAddress(address)) {
+    return NextResponse.json(
+      {
+        error:
+          "Invalid Solana token address.",
+      },
+      {
+        status: 400,
+      },
+    );
+  }
+
+  const timeframe =
+    parseTimeframe(
+      request.nextUrl.searchParams.get(
+        "tf",
+      ),
+    );
+
+  const requestedPool =
+    request.nextUrl.searchParams.get(
+      "pool",
+    );
+
+  const cacheKey =
+    `${address}:${requestedPool ?? "top"}:${timeframe}`;
+
+  const cached =
+    cache.get(cacheKey);
+
+  if (
+    cached &&
+    cached.expiresAt > Date.now()
+  ) {
+    return NextResponse.json(
+      cached.payload,
+    );
+  }
+
+  const warnings: string[] = [];
+
+  const [poolJson, infoJson] =
+    await Promise.all([
+      gtFetch(
+        `/networks/solana/tokens/${address}/pools?include=base_token,quote_token,dex&page=1`,
+        warnings,
+      ),
+
+      gtFetch(
+        `/networks/solana/tokens/${address}/info`,
+        warnings,
+      ),
+    ]);
+
+  const poolData =
+    arrayValue(poolJson?.data);
+
+  const pools =
+    poolData
+      .map((item) =>
+        parsePool(
+          item as GtResource,
+          address,
+        ),
+      )
+      .filter(
+        (
+          item,
+        ): item is TokenTerminalPool =>
+          item !== null,
+      )
+      .sort(
+        (a, b) =>
+          b.liquidityUsd -
+          a.liquidityUsd,
+      );
+
+  if (pools.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "No active GeckoTerminal pool found for this token.",
+        warnings,
+      },
+      {
+        status: 404,
+      },
+    );
+  }
+
+  const selectedPool =
+    pools.find(
+      (pool) =>
+        pool.address ===
+        requestedPool,
+    ) ?? pools[0];
+
+  const [candles, tradesJson] =
+    await Promise.all([
+      getOhlcv(
+        selectedPool.address,
+        address,
+        timeframe,
+        warnings,
+      ),
+
+      gtFetch(
+        `/networks/solana/pools/${selectedPool.address}/trades`,
+        warnings,
+      ),
+    ]);
+
+  const trades =
+    parseTrades(
+      tradesJson,
+      address,
+    );
+
+  const token =
+    parseInfo(
+      infoJson,
+      address,
+    );
+
+  const poolNameParts =
+    selectedPool.name.split(
+      " / ",
+    );
+
+  if (
+    token.symbol === "UNKNOWN" &&
+    poolNameParts[0]
+  ) {
+    token.symbol =
+      poolNameParts[0];
+  }
+
+  if (
+    token.name === "Unknown token"
+  ) {
+    token.name =
+      token.symbol;
+  }
+
+  const payload: TokenTerminalResponse =
+    {
+      generatedAt: Date.now(),
+      network: "solana",
+      timeframe,
+      token,
+      selectedPool,
+      pools: pools.slice(0, 12),
+      candles,
+      trades,
+      source: {
+        market: "GeckoTerminal",
+        onchain:
+          "MemeScope/Helius",
+      },
+      warnings,
+    };
+
+  cache.set(cacheKey, {
+    expiresAt:
+      Date.now() + 45_000,
+    payload,
+  });
+
+  return NextResponse.json(
+    payload,
+  );
+}

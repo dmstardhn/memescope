@@ -1,0 +1,747 @@
+"use client";
+
+import Link from "next/link";
+import {
+  Bookmark,
+  BookmarkCheck,
+  Copy,
+  ExternalLink,
+  Maximize2,
+  RefreshCw,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  MemeScopeLiveChart,
+  type MemeScopeDisplayCandle,
+} from "@/components/memescope-live-chart";
+import type {
+  MemeScopeLiveSnapshot,
+  MemeScopeLiveTrade,
+  MemeScopeStreamMode,
+} from "@/lib/memescope-market-types";
+import type {
+  TokenTerminalResponse,
+  TokenTerminalTimeframe,
+} from "@/lib/token-terminal-types";
+
+const WATCHLIST_KEY = "memescope-token-watchlist";
+const TIMEFRAMES: TokenTerminalTimeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+
+type Metric = "price" | "mcap";
+type Quote = "usd" | "sol";
+
+function timeframeSeconds(timeframe: TokenTerminalTimeframe) {
+  if (timeframe === "1m") return 60;
+  if (timeframe === "5m") return 300;
+  if (timeframe === "15m") return 900;
+  if (timeframe === "1h") return 3600;
+  if (timeframe === "4h") return 14400;
+  return 86400;
+}
+
+function money(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
+  if (Math.abs(value) >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  if (Math.abs(value) >= 1) return `$${value.toFixed(3)}`;
+  return `$${value.toPrecision(5)}`;
+}
+
+function solText(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M SOL`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(2)}K SOL`;
+  if (Math.abs(value) >= 1) return `${value.toFixed(3)} SOL`;
+  return `${value.toPrecision(5)} SOL`;
+}
+
+function short(value: string) {
+  if (value.length <= 13) return value;
+  return `${value.slice(0, 5)}...${value.slice(-4)}`;
+}
+
+function clock(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function streamLabel(mode: MemeScopeStreamMode) {
+  if (mode === "enhanced") return "LIVE PROCESSED";
+  if (mode === "logs-rpc") return "LIVE RPC";
+  if (mode === "reconnecting") return "RECONNECTING";
+  if (mode === "offline") return "OFFLINE";
+  return "CONNECTING";
+}
+
+export function TokenMarketTerminal({
+  address,
+  mode = "page",
+  onClose,
+}: {
+  address: string;
+  mode?: "page" | "modal";
+  onClose?: () => void;
+}) {
+  const [data, setData] = useState<TokenTerminalResponse | null>(null);
+  const [timeframe, setTimeframe] = useState<TokenTerminalTimeframe>("5m");
+  const [pool, setPool] = useState<string | null>(null);
+  const [metric, setMetric] = useState<Metric>("price");
+  const [quote, setQuote] = useState<Quote>("usd");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [streamMode, setStreamMode] = useState<MemeScopeStreamMode>("connecting");
+  const [streamMessage, setStreamMessage] = useState("Connecting real-time stream");
+  const [snapshot, setSnapshot] = useState<MemeScopeLiveSnapshot | null>(null);
+  const [liveTrades, setLiveTrades] = useState<MemeScopeLiveTrade[]>([]);
+  const [supply, setSupply] = useState<number | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function load(nextTf = timeframe, nextPool = pool) {
+    setLoading(true);
+
+    try {
+      const query = new URLSearchParams({ tf: nextTf });
+      if (nextPool) query.set("pool", nextPool);
+
+      const response = await fetch(
+        `/api/token-terminal/solana/${address}?${query.toString()}`,
+        { cache: "no-store" },
+      );
+      const result = (await response.json()) as TokenTerminalResponse | { error?: string };
+
+      if (!response.ok) {
+        throw new Error("error" in result ? result.error : "Token market data failed.");
+      }
+
+      const terminal = result as TokenTerminalResponse;
+      setData(terminal);
+      setPool(terminal.selectedPool.address);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Token market data failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setData(null);
+    setPool(null);
+    setSnapshot(null);
+    setLiveTrades([]);
+    setSupply(null);
+    setStreamMode("connecting");
+    void load("5m", null);
+
+    void fetch(`/api/risk/solana/${address}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as { supply?: number };
+      })
+      .then((report) => {
+        if (report && Number.isFinite(report.supply) && (report.supply ?? 0) > 0) {
+          setSupply(report.supply ?? null);
+        }
+      })
+      .catch(() => undefined);
+  }, [address]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(WATCHLIST_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      setSaved(Array.isArray(parsed) && parsed.includes(address));
+    } catch {
+      setSaved(false);
+    }
+  }, [address]);
+
+  useEffect(() => {
+    const selectedPool = data?.selectedPool.address;
+    if (!selectedPool) return;
+
+    setLiveTrades([]);
+    setSnapshot(null);
+    setStreamMode("connecting");
+
+    const source = new EventSource(
+      `/api/live-market/solana/${address}?pool=${encodeURIComponent(selectedPool)}`,
+    );
+
+    const onStatus = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data) as {
+          mode: MemeScopeStreamMode;
+          message: string;
+        };
+        setStreamMode(parsed.mode);
+        setStreamMessage(parsed.message);
+      } catch {
+        // Ignore malformed event.
+      }
+    };
+
+    const onSnapshot = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data) as { snapshot: MemeScopeLiveSnapshot };
+        setSnapshot(parsed.snapshot);
+      } catch {
+        // Ignore malformed event.
+      }
+    };
+
+    const onTrade = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data) as { trade: MemeScopeLiveTrade };
+        const trade = parsed.trade;
+
+        setLiveTrades((current) => {
+          if (trade.signature && current.some((item) => item.signature === trade.signature)) {
+            return current;
+          }
+          return [trade, ...current].slice(0, 300);
+        });
+
+        setSnapshot((current) => {
+          if (!current) return current;
+          const next = { ...current, updatedAt: Date.now() };
+          if (trade.priceUsd) next.priceUsd = trade.priceUsd;
+          if (trade.priceSol) next.priceSol = trade.priceSol;
+          if (trade.priceUsd && trade.priceSol && trade.priceSol > 0) {
+            next.solUsd = trade.priceUsd / trade.priceSol;
+          }
+          return next;
+        });
+      } catch {
+        // Ignore malformed event.
+      }
+    };
+
+    source.addEventListener("status", onStatus as EventListener);
+    source.addEventListener("snapshot", onSnapshot as EventListener);
+    source.addEventListener("trade", onTrade as EventListener);
+    source.onerror = () => {
+      setStreamMode("reconnecting");
+      setStreamMessage("Browser stream reconnecting");
+    };
+
+    return () => source.close();
+  }, [address, data?.selectedPool.address]);
+
+  const solUsd = snapshot?.solUsd ?? null;
+  const priceUsd = snapshot?.priceUsd ?? data?.selectedPool.priceUsd ?? null;
+  const priceSol = snapshot?.priceSol ?? (priceUsd && solUsd ? priceUsd / solUsd : null);
+
+  const effectiveSupply = useMemo(() => {
+    if (supply && supply > 0) return supply;
+    const basePrice = data?.selectedPool.priceUsd;
+    const cap = data?.selectedPool.marketCapUsd ?? data?.selectedPool.fdvUsd;
+    return basePrice && basePrice > 0 && cap && cap > 0 ? cap / basePrice : null;
+  }, [data, supply]);
+
+  const displayCandles = useMemo(() => {
+    const output = new Map<number, MemeScopeDisplayCandle>();
+    if (!data) return [];
+
+    const quoteScale = quote === "usd" ? 1 : solUsd && solUsd > 0 ? 1 / solUsd : null;
+    const valueScale =
+      quoteScale === null
+        ? null
+        : metric === "price"
+          ? quoteScale
+          : effectiveSupply
+            ? quoteScale * effectiveSupply
+            : null;
+
+    if (valueScale !== null) {
+      for (const item of data.candles) {
+        output.set(item.time, {
+          time: item.time,
+          open: item.open * valueScale,
+          high: item.high * valueScale,
+          low: item.low * valueScale,
+          close: item.close * valueScale,
+          volume:
+            quote === "usd"
+              ? item.volume
+              : solUsd && solUsd > 0
+                ? item.volume / solUsd
+                : 0,
+        });
+      }
+    }
+
+    const bucketSize = timeframeSeconds(timeframe);
+
+    for (const trade of liveTrades.slice().reverse()) {
+      const tradePrice = quote === "usd" ? trade.priceUsd : trade.priceSol;
+      if (!tradePrice || tradePrice <= 0) continue;
+
+      const value =
+        metric === "price"
+          ? tradePrice
+          : effectiveSupply
+            ? tradePrice * effectiveSupply
+            : null;
+      if (!value || value <= 0) continue;
+
+      const bucket = Math.floor(trade.timestamp / 1000 / bucketSize) * bucketSize;
+      const volume = quote === "usd" ? trade.usdAmount ?? 0 : trade.solAmount ?? 0;
+      const current = output.get(bucket);
+
+      if (!current) {
+        output.set(bucket, {
+          time: bucket,
+          open: value,
+          high: value,
+          low: value,
+          close: value,
+          volume,
+        });
+      } else {
+        current.high = Math.max(current.high, value);
+        current.low = Math.min(current.low, value);
+        current.close = value;
+        current.volume += volume;
+      }
+    }
+
+    return Array.from(output.values()).sort((a, b) => a.time - b.time).slice(-280);
+  }, [data, effectiveSupply, liveTrades, metric, quote, solUsd, timeframe]);
+
+  const transactions = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<{
+      key: string;
+      timestamp: number;
+      side: "buy" | "sell" | "unknown";
+      usd: number | null;
+      sol: number | null;
+      priceUsd: number | null;
+      priceSol: number | null;
+      maker: string | null;
+      signature: string;
+      live: boolean;
+      estimated: boolean;
+    }> = [];
+
+    for (const trade of liveTrades) {
+      const key = trade.signature || `${trade.timestamp}-${trade.tokenAmount}`;
+      seen.add(key);
+      rows.push({
+        key,
+        timestamp: trade.timestamp,
+        side: trade.side,
+        usd: trade.usdAmount,
+        sol: trade.solAmount,
+        priceUsd: trade.priceUsd,
+        priceSol: trade.priceSol,
+        maker: trade.maker,
+        signature: trade.signature,
+        live: true,
+        estimated: trade.estimated,
+      });
+    }
+
+    for (const trade of data?.trades ?? []) {
+      const key = trade.txHash || `${trade.timestamp}-${trade.volumeUsd}`;
+      if (seen.has(key)) continue;
+      rows.push({
+        key,
+        timestamp: trade.timestamp,
+        side: trade.kind,
+        usd: trade.volumeUsd,
+        sol: solUsd && solUsd > 0 ? trade.volumeUsd / solUsd : null,
+        priceUsd: trade.priceUsd,
+        priceSol: trade.priceUsd && solUsd ? trade.priceUsd / solUsd : null,
+        maker: trade.maker,
+        signature: trade.txHash,
+        live: false,
+        estimated: false,
+      });
+    }
+
+    return rows.sort((a, b) => b.timestamp - a.timestamp).slice(0, 180);
+  }, [data, liveTrades, solUsd]);
+
+  const currentValue =
+    metric === "price"
+      ? quote === "usd"
+        ? priceUsd
+        : priceSol
+      : effectiveSupply
+        ? quote === "usd"
+          ? priceUsd
+            ? priceUsd * effectiveSupply
+            : null
+          : priceSol
+            ? priceSol * effectiveSupply
+            : null
+        : null;
+
+  function toggleWatchlist() {
+    let values: string[] = [];
+    try {
+      const raw = localStorage.getItem(WATCHLIST_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(parsed)) {
+        values = parsed.filter((item): item is string => typeof item === "string");
+      }
+    } catch {
+      values = [];
+    }
+
+    const exists = values.includes(address);
+    const next = exists
+      ? values.filter((item) => item !== address)
+      : Array.from(new Set([...values, address]));
+
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
+    setSaved(!exists);
+  }
+
+  async function switchTimeframe(next: TokenTerminalTimeframe) {
+    setTimeframe(next);
+    await load(next, pool);
+  }
+
+  async function switchPool(next: string) {
+    setPool(next);
+    await load(timeframe, next);
+  }
+
+  const main = (
+    <div
+      className={
+        mode === "modal"
+          ? "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#080a0f] shadow-2xl"
+          : "mx-auto w-full max-w-[1500px] px-3 py-4 lg:px-5"
+      }
+    >
+      <header
+        className={`flex flex-wrap items-center justify-between gap-3 ${
+          mode === "modal" ? "border-b border-white/5 px-4 py-3" : "mb-3"
+        }`}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          {data?.token.imageUrl ? (
+            <img
+              src={data.token.imageUrl}
+              alt=""
+              className="h-10 w-10 rounded-full border border-white/10 object-cover"
+            />
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xs font-bold text-zinc-500">
+              {data?.token.symbol?.slice(0, 2) ?? "?"}
+            </div>
+          )}
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-lg font-semibold text-white">
+                {data?.token.symbol ?? "Loading"}
+              </span>
+              <span className="max-w-[240px] truncate text-xs text-zinc-600">
+                {data?.token.name ?? ""}
+              </span>
+              <span
+                title={streamMessage}
+                className={`rounded-full border px-2 py-0.5 text-[9px] font-medium ${
+                  streamMode === "enhanced" || streamMode === "logs-rpc"
+                    ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300"
+                    : streamMode === "offline"
+                      ? "border-red-400/20 bg-red-400/[0.06] text-red-300"
+                      : "border-amber-400/20 bg-amber-400/[0.06] text-amber-300"
+                }`}
+              >
+                {streamLabel(streamMode)}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(address)}
+              className="mt-1 flex items-center gap-1 text-[10px] text-zinc-700 hover:text-zinc-400"
+            >
+              {short(address)}
+              <Copy className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleWatchlist}
+            className={`rounded-lg border p-2 ${
+              saved
+                ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                : "border-white/10 text-zinc-500 hover:text-white"
+            }`}
+            title="Watchlist"
+          >
+            {saved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+          </button>
+
+          {mode === "modal" && (
+            <Link
+              href={`/token/${address}`}
+              data-native-terminal-full="true"
+              className="rounded-lg border border-white/10 p-2 text-zinc-500 hover:text-white"
+              title="Open full terminal"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Link>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-lg border border-white/10 p-2 text-zinc-500 hover:text-white"
+            title="Refresh history"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+
+          {mode === "modal" && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-white/10 p-2 text-zinc-500 hover:text-white"
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className={mode === "modal" ? "overflow-y-auto p-3 lg:p-4" : ""}>
+        {error && (
+          <div className="mb-3 rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3 text-xs text-amber-200/80">
+            {error}
+          </div>
+        )}
+
+        <section className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+            <div className="text-[9px] uppercase tracking-[0.13em] text-zinc-700">
+              {metric === "price" ? "Price" : "Market Cap"}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-white">
+              {quote === "usd" ? money(currentValue) : solText(currentValue)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+            <div className="text-[9px] uppercase tracking-[0.13em] text-zinc-700">Liquidity</div>
+            <div className="mt-1 text-sm font-semibold text-white">
+              {money(data?.selectedPool.liquidityUsd)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+            <div className="text-[9px] uppercase tracking-[0.13em] text-zinc-700">24h Volume</div>
+            <div className="mt-1 text-sm font-semibold text-white">
+              {money(data?.selectedPool.volume.h24)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+            <div className="text-[9px] uppercase tracking-[0.13em] text-zinc-700">Live trades</div>
+            <div className="mt-1 text-sm font-semibold text-emerald-300">{liveTrades.length}</div>
+          </div>
+        </section>
+
+        <section className="mx-auto mb-3 max-w-[1080px] overflow-hidden rounded-2xl border border-white/10 bg-[#090b0f]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setMetric("price")}
+                className={`rounded-md px-2.5 py-1.5 text-[10px] ${
+                  metric === "price" ? "bg-white text-black" : "text-zinc-500 hover:bg-white/5"
+                }`}
+              >
+                PRICE
+              </button>
+              <button
+                type="button"
+                onClick={() => setMetric("mcap")}
+                className={`rounded-md px-2.5 py-1.5 text-[10px] ${
+                  metric === "mcap" ? "bg-white text-black" : "text-zinc-500 hover:bg-white/5"
+                }`}
+              >
+                MCAP
+              </button>
+              <span className="mx-1 h-4 w-px bg-white/10" />
+              <button
+                type="button"
+                onClick={() => setQuote("usd")}
+                className={`rounded-md px-2.5 py-1.5 text-[10px] ${
+                  quote === "usd" ? "bg-emerald-400/10 text-emerald-300" : "text-zinc-600 hover:text-white"
+                }`}
+              >
+                USD
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuote("sol")}
+                className={`rounded-md px-2.5 py-1.5 text-[10px] ${
+                  quote === "sol" ? "bg-violet-400/10 text-violet-300" : "text-zinc-600 hover:text-white"
+                }`}
+              >
+                SOL
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1">
+              {TIMEFRAMES.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => void switchTimeframe(item)}
+                  className={`rounded-md px-2 py-1.5 text-[10px] ${
+                    timeframe === item ? "bg-white/10 text-white" : "text-zinc-600 hover:text-white"
+                  }`}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative px-2 py-2">
+            {displayCandles.length === 0 && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-xs text-zinc-600">
+                Waiting for market candles / first live swap...
+              </div>
+            )}
+            <MemeScopeLiveChart
+              candles={displayCandles}
+              seriesKey={`${address}-${data?.selectedPool.address ?? "none"}-${metric}-${quote}-${timeframe}`}
+              height={350}
+            />
+          </div>
+        </section>
+
+        {data && data.pools.length > 1 && (
+          <section className="mx-auto mb-3 flex max-w-[1080px] gap-2 overflow-x-auto pb-1">
+            {data.pools.slice(0, 8).map((item) => (
+              <button
+                key={item.address}
+                type="button"
+                onClick={() => void switchPool(item.address)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left text-[10px] ${
+                  item.address === data.selectedPool.address
+                    ? "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-300"
+                    : "border-white/10 text-zinc-600 hover:text-white"
+                }`}
+              >
+                <div>{item.dexName}</div>
+                <div className="mt-0.5 text-[9px] opacity-70">Liq {money(item.liquidityUsd)}</div>
+              </button>
+            ))}
+          </section>
+        )}
+
+        <section className="mx-auto max-w-[1080px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+          <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Transactions</div>
+              <div className="mt-1 text-[10px] text-zinc-700">
+                Live rows are pushed from MemeScope market engine; no browser polling.
+              </div>
+            </div>
+            <div className="text-[10px] text-zinc-700">{transactions.length} rows</div>
+          </div>
+
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full min-w-[820px] text-left text-xs">
+              <thead className="sticky top-0 z-10 bg-[#0c0f14] text-[9px] uppercase tracking-[0.12em] text-zinc-700">
+                <tr>
+                  <th className="px-4 py-2.5">Time</th>
+                  <th className="px-3 py-2.5">Type</th>
+                  <th className="px-3 py-2.5">USD</th>
+                  <th className="px-3 py-2.5">SOL</th>
+                  <th className="px-3 py-2.5">Price USD</th>
+                  <th className="px-3 py-2.5">Price SOL</th>
+                  <th className="px-3 py-2.5">Maker</th>
+                  <th className="px-3 py-2.5">Tx</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((trade) => (
+                  <tr
+                    key={trade.key}
+                    className={`border-t border-white/5 ${trade.live ? "bg-emerald-400/[0.015]" : ""}`}
+                  >
+                    <td className="px-4 py-2.5 text-zinc-600">
+                      <span className="flex items-center gap-1.5">
+                        {clock(trade.timestamp)}
+                        {trade.live && (
+                          <span className="rounded bg-emerald-400/10 px-1 py-0.5 text-[8px] text-emerald-300">LIVE</span>
+                        )}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3 py-2.5 font-semibold uppercase ${
+                        trade.side === "buy"
+                          ? "text-emerald-300"
+                          : trade.side === "sell"
+                            ? "text-red-300"
+                            : "text-zinc-500"
+                      }`}
+                    >
+                      {trade.side}
+                      {trade.estimated && (
+                        <span className="ml-1 text-[8px] font-normal text-amber-400/60">EST</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-zinc-300">{money(trade.usd)}</td>
+                    <td className="px-3 py-2.5 text-zinc-300">{solText(trade.sol)}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-zinc-500">{money(trade.priceUsd)}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-zinc-500">{solText(trade.priceSol)}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-zinc-600">
+                      {trade.maker ? short(trade.maker) : "N/A"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {trade.signature ? (
+                        <a
+                          href={`https://solscan.io/tx/${trade.signature}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-zinc-600 hover:text-white"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span className="text-zinc-800">N/A</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {transactions.length === 0 && (
+              <div className="p-10 text-center text-xs text-zinc-600">
+                Waiting for the first transaction from this pool...
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="mx-auto mt-3 max-w-[1080px] text-[9px] leading-4 text-zinc-700">
+          Processed Enhanced WebSocket is the lowest-latency mode used here. Standard WebSocket + RPC is the automatic fallback. â€œESTâ€ marks a row where quote value had to be estimated from the latest market snapshot.
+        </div>
+      </div>
+    </div>
+  );
+
+  return main;
+}
