@@ -15,25 +15,74 @@ import type {
 } from "@/lib/signal-types";
 import {
   escapeTelegramHtml,
+  telegramAnswerCallbackQuery,
   telegramConfig,
+  telegramEditMessage,
   telegramSendMessage,
   telegramSiteUrl,
 } from "@/lib/telegram";
 
-type TelegramUpdate = {
-  message?: {
-    message_id?: number;
-    text?: string;
-    chat?: {
-      id?: number;
-    };
-    from?: {
-      id?: number;
-      username?: string;
-      first_name?: string;
-    };
+type TelegramMessage = {
+  message_id?: number;
+  text?: string;
+  chat?: {
+    id?: number;
+  };
+  from?: {
+    id?: number;
+    username?: string;
+    first_name?: string;
   };
 };
+
+type TelegramCallbackQuery = {
+  id?: string;
+  data?: string;
+  from?: {
+    id?: number;
+    username?: string;
+    first_name?: string;
+  };
+  message?: TelegramMessage;
+};
+
+type TelegramUpdate = {
+  message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+};
+
+type InlineButton = {
+  text: string;
+  callback_data?: string;
+  url?: string;
+};
+
+type InlineKeyboard = {
+  inline_keyboard: InlineButton[][];
+};
+
+function ownerId() {
+  return (
+    process.env
+      .TELEGRAM_OWNER_ID
+      ?.trim() ??
+    ""
+  );
+}
+
+function isOwner(
+  userId: number | undefined,
+) {
+  const expected =
+    ownerId();
+
+  return Boolean(
+    expected &&
+      userId &&
+      String(userId) ===
+        expected,
+  );
+}
 
 function validSolanaAddress(
   value: string,
@@ -61,7 +110,15 @@ function compactUsd(
   return `$${value.toFixed(0)}`;
 }
 
-function settingsText(
+function currentMark(
+  active: boolean,
+) {
+  return active
+    ? " [CURRENT]"
+    : "";
+}
+
+function mainSettingsText(
   settings: SignalSettings,
 ) {
   const preset =
@@ -70,40 +127,385 @@ function settingsText(
     );
 
   return [
-    "<b>MEMESCOPE OWNER CONTROL</b>",
+    "<b>MEMESCOPE ENGINE CONTROL</b>",
     "",
+    "Engine: <b>ACTIVE</b>",
     `Preset: <b>${escapeTelegramHtml(
       preset.toUpperCase(),
     )}</b>`,
     "",
     "<b>Owner-adjustable filters</b>",
-    `Minimum score: <b>${settings.minSignalScore}</b>`,
-    `Minimum liquidity: <b>${compactUsd(
+    `Signal Score        &gt;= <b>${settings.minSignalScore}</b>`,
+    `Liquidity           &gt;= <b>${compactUsd(
       settings.minLiquidityUsd,
     )}</b>`,
-    `Maximum pair age: <b>${settings.maxPairAgeHours}h</b>`,
+    `Maximum Pair Age    <b>${settings.maxPairAgeHours}h</b>`,
     "",
-    "<b>Fixed Stage 16 HQ gates</b>",
-    "5m volume >= $10K",
-    "5m transactions >= 40",
-    "Buy pressure 60% - 88%",
-    "Volume spike 1.30x - 3.50x",
-    "5m momentum +2% - +15%",
-    "1h momentum -5% - +120%",
-    "Liquidity / valuation >= 8%",
-    "Confirmation: 2 consecutive scans",
-    "Potential TP: dynamic analysis-based",
+    "<b>Stage 16 HQ filters</b>",
+    "Volume 5m           &gt;= $10K",
+    "Transactions 5m     &gt;= 40",
+    "Buy Pressure        60% - 88%",
+    "Volume Spike        1.30x - 3.50x",
+    "Momentum 5m         +2% - +15%",
+    "Momentum 1h         -5% - +120%",
+    "Liquidity / MC      &gt;= 8%",
+    "Confirmation        2 scans",
+    "Potential TP        Dynamic",
     "",
-    "<b>Commands</b>",
-    "/preset strict",
-    "/preset balanced",
-    "/preset broad",
-    "/setscore 85",
-    "/setliq 75000",
-    "/setage 18",
-    "/resetsettings",
+    "<i>Tap a button below. Changes are stored server-side and apply to new detections.</i>",
+  ].join("\n");
+}
+
+function mainKeyboard(): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text:
+            "\u2699\uFE0F Preset",
+          callback_data:
+            "ms:preset",
+        },
+        {
+          text:
+            "\u2B50 Score",
+          callback_data:
+            "ms:score",
+        },
+      ],
+      [
+        {
+          text:
+            "\uD83D\uDCA7 Liquidity",
+          callback_data:
+            "ms:liq",
+        },
+        {
+          text:
+            "\u23F1 Pair Age",
+          callback_data:
+            "ms:age",
+        },
+      ],
+      [
+        {
+          text:
+            "\uD83D\uDD27 Advanced",
+          callback_data:
+            "ms:advanced",
+        },
+        {
+          text:
+            "\uD83D\uDD04 Refresh",
+          callback_data:
+            "ms:refresh",
+        },
+      ],
+      [
+        {
+          text:
+            "\u21BA Reset Default",
+          callback_data:
+            "ms:reset",
+        },
+      ],
+    ],
+  };
+}
+
+function backKeyboard(): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text:
+            "\u2190 Back",
+          callback_data:
+            "ms:menu",
+        },
+      ],
+    ],
+  };
+}
+
+function presetText(
+  settings: SignalSettings,
+) {
+  const preset =
+    signalPresetName(
+      settings,
+    );
+
+  return [
+    "<b>ENGINE PRESET</b>",
     "",
-    "<i>Changes apply to new signal detection. Existing records keep their original entry snapshot and target.</i>",
+    `Current: <b>${escapeTelegramHtml(
+      preset.toUpperCase(),
+    )}</b>`,
+    "",
+    "<b>STRICT</b>",
+    "Score >= 90 | Liquidity >= $100K | Age <= 12h",
+    "",
+    "<b>BALANCED HQ</b>",
+    "Score >= 80 | Liquidity >= $50K | Age <= 24h",
+    "",
+    "<b>BROAD</b>",
+    "Score >= 75 | Liquidity >= $25K | Age <= 48h",
+    "",
+    "<i>Choose one preset. You can still customize individual values afterwards.</i>",
+  ].join("\n");
+}
+
+function presetKeyboard(
+  settings: SignalSettings,
+): InlineKeyboard {
+  const current =
+    signalPresetName(
+      settings,
+    );
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text:
+            `Strict${currentMark(
+              current === "strict",
+            )}`,
+          callback_data:
+            "ms:preset:strict",
+        },
+      ],
+      [
+        {
+          text:
+            `Balanced HQ${currentMark(
+              current === "balanced",
+            )}`,
+          callback_data:
+            "ms:preset:balanced",
+        },
+      ],
+      [
+        {
+          text:
+            `Broad${currentMark(
+              current === "broad",
+            )}`,
+          callback_data:
+            "ms:preset:broad",
+        },
+      ],
+      [
+        {
+          text:
+            "\u2190 Back",
+          callback_data:
+            "ms:menu",
+        },
+      ],
+    ],
+  };
+}
+
+function scoreText(
+  settings: SignalSettings,
+) {
+  return [
+    "<b>MINIMUM SIGNAL SCORE</b>",
+    "",
+    `Current: <b>${settings.minSignalScore}</b>`,
+    "",
+    "Higher values are more selective.",
+    "",
+    "<i>Tap a value to save it immediately.</i>",
+  ].join("\n");
+}
+
+function scoreKeyboard(
+  settings: SignalSettings,
+): InlineKeyboard {
+  const values = [
+    60,
+    70,
+    75,
+    80,
+    85,
+    90,
+    95,
+  ];
+
+  const buttons =
+    values.map(
+      (value) => ({
+        text:
+          `${value}${currentMark(
+            settings.minSignalScore ===
+              value,
+          )}`,
+        callback_data:
+          `ms:score:${value}`,
+      }),
+    );
+
+  return {
+    inline_keyboard: [
+      buttons.slice(0, 3),
+      buttons.slice(3, 6),
+      buttons.slice(6),
+      [
+        {
+          text:
+            "\u2190 Back",
+          callback_data:
+            "ms:menu",
+        },
+      ],
+    ],
+  };
+}
+
+function liquidityText(
+  settings: SignalSettings,
+) {
+  return [
+    "<b>MINIMUM LIQUIDITY</b>",
+    "",
+    `Current: <b>${compactUsd(
+      settings.minLiquidityUsd,
+    )}</b>`,
+    "",
+    "Higher values require deeper pools.",
+    "",
+    "<i>Tap a value to save it immediately.</i>",
+  ].join("\n");
+}
+
+function liquidityKeyboard(
+  settings: SignalSettings,
+): InlineKeyboard {
+  const values = [
+    10_000,
+    25_000,
+    50_000,
+    75_000,
+    100_000,
+    150_000,
+    250_000,
+    500_000,
+  ];
+
+  const buttons =
+    values.map(
+      (value) => ({
+        text:
+          `${compactUsd(
+            value,
+          )}${currentMark(
+            settings.minLiquidityUsd ===
+              value,
+          )}`,
+        callback_data:
+          `ms:liq:${value}`,
+      }),
+    );
+
+  return {
+    inline_keyboard: [
+      buttons.slice(0, 2),
+      buttons.slice(2, 4),
+      buttons.slice(4, 6),
+      buttons.slice(6, 8),
+      [
+        {
+          text:
+            "\u2190 Back",
+          callback_data:
+            "ms:menu",
+        },
+      ],
+    ],
+  };
+}
+
+function ageText(
+  settings: SignalSettings,
+) {
+  return [
+    "<b>MAXIMUM PAIR AGE</b>",
+    "",
+    `Current: <b>${settings.maxPairAgeHours}h</b>`,
+    "",
+    "Tokens older than this limit are excluded from new HQ detections.",
+    "",
+    "<i>Tap a value to save it immediately.</i>",
+  ].join("\n");
+}
+
+function ageKeyboard(
+  settings: SignalSettings,
+): InlineKeyboard {
+  const values = [
+    6,
+    12,
+    18,
+    24,
+    48,
+    72,
+    168,
+  ];
+
+  const buttons =
+    values.map(
+      (value) => ({
+        text:
+          `${
+            value === 168
+              ? "7d"
+              : `${value}h`
+          }${currentMark(
+            settings.maxPairAgeHours ===
+              value,
+          )}`,
+        callback_data:
+          `ms:age:${value}`,
+      }),
+    );
+
+  return {
+    inline_keyboard: [
+      buttons.slice(0, 3),
+      buttons.slice(3, 6),
+      buttons.slice(6),
+      [
+        {
+          text:
+            "\u2190 Back",
+          callback_data:
+            "ms:menu",
+        },
+      ],
+    ],
+  };
+}
+
+function advancedText() {
+  return [
+    "<b>STAGE 16 ADVANCED FILTERS</b>",
+    "",
+    "<b>These remain fixed in Stage 19.1:</b>",
+    "",
+    "Volume 5m           >= $10K",
+    "Transactions 5m     >= 40",
+    "Buy Pressure        60% - 88%",
+    "Volume Spike        1.30x - 3.50x",
+    "Momentum 5m         +2% - +15%",
+    "Momentum 1h         -5% - +120%",
+    "Liquidity / MC      >= 8%",
+    "Confirmation        2 consecutive scans",
+    "Potential TP        Dynamic analysis",
+    "",
+    "<i>Score, Liquidity and Pair Age can be changed from the main control panel.</i>",
   ].join("\n");
 }
 
@@ -111,25 +513,17 @@ function helpText() {
   return [
     "<b>MemeScope Owner Bot</b>",
     "",
-    "<b>Engine control</b>",
-    "/settings - current live signal settings",
-    "/preset &lt;strict|balanced|broad&gt;",
-    "/setscore &lt;60-95&gt;",
-    "/setliq &lt;10000-1000000&gt;",
-    "/setage &lt;1-168 hours&gt;",
-    "/resetsettings - restore defaults",
-    "",
-    "<b>Monitoring</b>",
+    "/settings - visual signal control panel",
     "/signals - active HQ signals",
     "/history - recent signal history",
     "/stats - 30-day signal statistics",
     "/token &lt;CA&gt; - open token",
     "/risk &lt;CA&gt; - open risk analysis",
     "/channel - signal channel",
-    "/whoami - show your Telegram user ID",
+    "/whoami - show Telegram user ID",
     "/help - commands",
     "",
-    "<i>Signal scores and Potential TP are analytical heuristics, not guaranteed returns.</i>",
+    "<i>Use /settings for the easiest configuration.</i>",
   ].join("\n");
 }
 
@@ -180,6 +574,7 @@ async function reply(
   chatId: number,
   messageId: number | undefined,
   text: string,
+  keyboard?: InlineKeyboard,
 ) {
   return telegramSendMessage(
     chatId,
@@ -187,7 +582,33 @@ async function reply(
     {
       replyToMessageId:
         messageId,
+      ...(keyboard
+        ? {
+            replyMarkup:
+              keyboard as unknown as Record<
+                string,
+                unknown
+              >,
+          }
+        : {}),
     },
+  );
+}
+
+async function editPanel(
+  chatId: number,
+  messageId: number,
+  text: string,
+  keyboard: InlineKeyboard,
+) {
+  return telegramEditMessage(
+    chatId,
+    messageId,
+    text,
+    keyboard as unknown as Record<
+      string,
+      unknown
+    >,
   );
 }
 
@@ -204,6 +625,353 @@ function oneNumber(
   )
     ? number
     : null;
+}
+
+async function handleCallback(
+  callback: TelegramCallbackQuery,
+) {
+  const callbackId =
+    callback.id;
+
+  const data =
+    callback.data ??
+    "";
+
+  const userId =
+    callback.from?.id;
+
+  const chatId =
+    callback.message?.chat?.id;
+
+  const messageId =
+    callback.message?.message_id;
+
+  if (!callbackId) {
+    return;
+  }
+
+  if (
+    !isOwner(
+      userId,
+    )
+  ) {
+    await telegramAnswerCallbackQuery(
+      callbackId,
+      {
+        text:
+          "Unauthorized. Owner only.",
+        showAlert: true,
+      },
+    );
+
+    return;
+  }
+
+  if (
+    !chatId ||
+    !messageId
+  ) {
+    await telegramAnswerCallbackQuery(
+      callbackId,
+      {
+        text:
+          "This control message is unavailable.",
+        showAlert: true,
+      },
+    );
+
+    return;
+  }
+
+  await telegramAnswerCallbackQuery(
+    callbackId,
+  );
+
+  const parts =
+    data.split(":");
+
+  const action =
+    parts[1] ??
+    "menu";
+
+  const value =
+    parts[2] ??
+    "";
+
+  if (
+    data === "ms:menu" ||
+    data === "ms:refresh"
+  ) {
+    const settings =
+      await getSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:preset"
+  ) {
+    const settings =
+      await getSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      presetText(
+        settings,
+      ),
+      presetKeyboard(
+        settings,
+      ),
+    );
+
+    return;
+  }
+
+  if (
+    action === "preset" &&
+    (
+      value === "strict" ||
+      value === "balanced" ||
+      value === "broad"
+    )
+  ) {
+    const settings =
+      await applySignalPreset(
+        value as SignalPresetName,
+      );
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:score"
+  ) {
+    const settings =
+      await getSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      scoreText(
+        settings,
+      ),
+      scoreKeyboard(
+        settings,
+      ),
+    );
+
+    return;
+  }
+
+  if (
+    action === "score"
+  ) {
+    const number =
+      oneNumber(
+        value,
+      );
+
+    if (
+      number === null ||
+      number < 60 ||
+      number > 95
+    ) {
+      return;
+    }
+
+    const settings =
+      await saveSignalEngineSettings({
+        minSignalScore:
+          Math.round(
+            number,
+          ),
+      });
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:liq"
+  ) {
+    const settings =
+      await getSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      liquidityText(
+        settings,
+      ),
+      liquidityKeyboard(
+        settings,
+      ),
+    );
+
+    return;
+  }
+
+  if (
+    action === "liq"
+  ) {
+    const number =
+      oneNumber(
+        value,
+      );
+
+    if (
+      number === null ||
+      number < 10_000 ||
+      number > 1_000_000
+    ) {
+      return;
+    }
+
+    const settings =
+      await saveSignalEngineSettings({
+        minLiquidityUsd:
+          Math.round(
+            number,
+          ),
+      });
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:age"
+  ) {
+    const settings =
+      await getSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      ageText(
+        settings,
+      ),
+      ageKeyboard(
+        settings,
+      ),
+    );
+
+    return;
+  }
+
+  if (
+    action === "age"
+  ) {
+    const number =
+      oneNumber(
+        value,
+      );
+
+    if (
+      number === null ||
+      number < 1 ||
+      number > 168
+    ) {
+      return;
+    }
+
+    const settings =
+      await saveSignalEngineSettings({
+        maxPairAgeHours:
+          Math.round(
+            number,
+          ),
+      });
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:advanced"
+  ) {
+    await editPanel(
+      chatId,
+      messageId,
+      advancedText(),
+      backKeyboard(),
+    );
+
+    return;
+  }
+
+  if (
+    data === "ms:reset"
+  ) {
+    const settings =
+      await resetSignalEngineSettings();
+
+    await editPanel(
+      chatId,
+      messageId,
+      mainSettingsText(
+        settings,
+      ),
+      mainKeyboard(),
+    );
+
+    return;
+  }
+
+  const settings =
+    await getSignalEngineSettings();
+
+  await editPanel(
+    chatId,
+    messageId,
+    mainSettingsText(
+      settings,
+    ),
+    mainKeyboard(),
+  );
 }
 
 export async function POST(
@@ -249,6 +1017,41 @@ export async function POST(
   const update =
     (await request.json()) as
       TelegramUpdate;
+
+  if (
+    update.callback_query
+  ) {
+    try {
+      await handleCallback(
+        update.callback_query,
+      );
+    } catch (error) {
+      const id =
+        update.callback_query.id;
+
+      if (id) {
+        await telegramAnswerCallbackQuery(
+          id,
+          {
+            text:
+              error instanceof Error
+                ? error.message.slice(
+                    0,
+                    180,
+                  )
+                : "MemeScope callback failed.",
+            showAlert: true,
+          },
+        ).catch(
+          () => undefined,
+        );
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+    });
+  }
 
   const message =
     update.message;
@@ -298,8 +1101,6 @@ export async function POST(
           userId ??
             "unknown",
         )}</code>`,
-        "",
-        "Use this value as TELEGRAM_OWNER_ID in Vercel Production.",
       ].join("\n"),
     );
 
@@ -308,13 +1109,7 @@ export async function POST(
     });
   }
 
-  const ownerId =
-    process.env
-      .TELEGRAM_OWNER_ID
-      ?.trim() ??
-    "";
-
-  if (!ownerId) {
+  if (!ownerId()) {
     await reply(
       chatId,
       message.message_id,
@@ -325,8 +1120,6 @@ export async function POST(
           userId ??
             "unknown",
         )}</code>`,
-        "",
-        "Set this as TELEGRAM_OWNER_ID in Vercel Production, redeploy, then bootstrap Telegram.",
       ].join("\n"),
     );
 
@@ -336,9 +1129,9 @@ export async function POST(
   }
 
   if (
-    !userId ||
-    String(userId) !==
-      ownerId
+    !isOwner(
+      userId,
+    )
   ) {
     await reply(
       chatId,
@@ -378,9 +1171,10 @@ export async function POST(
       await reply(
         chatId,
         message.message_id,
-        settingsText(
+        mainSettingsText(
           settings,
         ),
+        mainKeyboard(),
       );
     } else if (
       command === "/preset"
@@ -388,17 +1182,25 @@ export async function POST(
       const preset =
         argument.toLowerCase();
 
-      if (
-        preset !== "strict" &&
-        preset !== "balanced" &&
-        preset !== "broad"
-      ) {
+      if (!preset) {
+        const settings =
+          await getSignalEngineSettings();
+
         await reply(
           chatId,
           message.message_id,
-          "Usage: <code>/preset strict</code>, <code>/preset balanced</code>, or <code>/preset broad</code>.",
+          presetText(
+            settings,
+          ),
+          presetKeyboard(
+            settings,
+          ),
         );
-      } else {
+      } else if (
+        preset === "strict" ||
+        preset === "balanced" ||
+        preset === "broad"
+      ) {
         const settings =
           await applySignalPreset(
             preset as SignalPresetName,
@@ -407,15 +1209,16 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          [
-            `<b>Preset updated: ${escapeTelegramHtml(
-              preset.toUpperCase(),
-            )}</b>`,
-            "",
-            settingsText(
-              settings,
-            ),
-          ].join("\n"),
+          mainSettingsText(
+            settings,
+          ),
+          mainKeyboard(),
+        );
+      } else {
+        await reply(
+          chatId,
+          message.message_id,
+          "Usage: /preset strict, /preset balanced, or /preset broad.",
         );
       }
     } else if (
@@ -434,7 +1237,7 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          "Usage: <code>/setscore 85</code> (allowed 60-95).",
+          "Usage: /setscore 85 (allowed 60-95).",
         );
       } else {
         const settings =
@@ -448,9 +1251,10 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          settingsText(
+          mainSettingsText(
             settings,
           ),
+          mainKeyboard(),
         );
       }
     } else if (
@@ -469,7 +1273,7 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          "Usage: <code>/setliq 75000</code> (allowed 10000-1000000 USD).",
+          "Usage: /setliq 75000 (allowed 10000-1000000 USD).",
         );
       } else {
         const settings =
@@ -483,9 +1287,10 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          settingsText(
+          mainSettingsText(
             settings,
           ),
+          mainKeyboard(),
         );
       }
     } else if (
@@ -504,7 +1309,7 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          "Usage: <code>/setage 24</code> (allowed 1-168 hours).",
+          "Usage: /setage 24 (allowed 1-168 hours).",
         );
       } else {
         const settings =
@@ -518,9 +1323,10 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          settingsText(
+          mainSettingsText(
             settings,
           ),
+          mainKeyboard(),
         );
       }
     } else if (
@@ -533,13 +1339,10 @@ export async function POST(
       await reply(
         chatId,
         message.message_id,
-        [
-          "<b>Default settings restored.</b>",
-          "",
-          settingsText(
-            settings,
-          ),
-        ].join("\n"),
+        mainSettingsText(
+          settings,
+        ),
+        mainKeyboard(),
       );
     } else if (
       command === "/signals"
@@ -739,7 +1542,7 @@ export async function POST(
         await reply(
           chatId,
           message.message_id,
-          `Usage: <code>${command} &lt;Solana CA&gt;</code>`,
+          `Usage: ${command} &lt;Solana CA&gt;`,
         );
       } else {
         const encoded =

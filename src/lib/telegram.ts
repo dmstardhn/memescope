@@ -229,6 +229,30 @@ export async function telegramEditMessage(
   }
 }
 
+export async function telegramAnswerCallbackQuery(
+  callbackQueryId: string,
+  options?: {
+    text?: string;
+    showAlert?: boolean;
+  },
+) {
+  return telegramRequest<boolean>(
+    "answerCallbackQuery",
+    {
+      callback_query_id:
+        callbackQueryId,
+      ...(options?.text
+        ? {
+            text:
+              options.text,
+          }
+        : {}),
+      show_alert:
+        options?.showAlert ??
+        false,
+    },
+  );
+}
 export async function telegramSetCommands() {
   return telegramRequest<boolean>(
     "setMyCommands",
@@ -326,6 +350,7 @@ export async function telegramSetWebhook(
         webhookSecret,
       allowed_updates: [
         "message",
+        "callback_query",
       ],
       drop_pending_updates: true,
     },
