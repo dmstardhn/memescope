@@ -297,134 +297,6 @@ export async function getSignalHistory(limit = 100) {
   return rows.map((row) => normalizeRecord(row as DbRow));
 }
 
-
-type DexPricePair = {
-  chainId?: string;
-  priceUsd?: string;
-  baseToken?: {
-    address?: string;
-  };
-  liquidity?: {
-    usd?: number;
-  };
-};
-
-async function fetchTrackedTokenPrices(
-  addresses: string[],
-) {
-  const unique = Array.from(
-    new Set(
-      addresses.filter(Boolean),
-    ),
-  );
-
-  const prices = new Map<
-    string,
-    number
-  >();
-
-  for (
-    let index = 0;
-    index < unique.length;
-    index += 30
-  ) {
-    const batch =
-      unique.slice(
-        index,
-        index + 30,
-      );
-
-    if (
-      batch.length === 0
-    ) {
-      continue;
-    }
-
-    try {
-      const url =
-        `https://api.dexscreener.com/tokens/v1/solana/${batch.join(
-          ",",
-        )}`;
-
-      const response =
-        await fetch(
-          url,
-          {
-            cache: "no-store",
-            headers: {
-              accept:
-                "application/json",
-            },
-          },
-        );
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const pairs =
-        (await response.json()) as DexPricePair[];
-
-      const bestLiquidity =
-        new Map<
-          string,
-          number
-        >();
-
-      for (
-        const pair of pairs
-      ) {
-        const address =
-          pair.baseToken?.address;
-
-        const parsedPrice =
-          Number(
-            pair.priceUsd,
-          );
-
-        if (
-          !address ||
-          !Number.isFinite(
-            parsedPrice,
-          ) ||
-          parsedPrice <= 0
-        ) {
-          continue;
-        }
-
-        const liquidity =
-          Number(
-            pair.liquidity?.usd ??
-              0,
-          );
-
-        const previousLiquidity =
-          bestLiquidity.get(
-            address,
-          ) ?? -1;
-
-        if (
-          liquidity >=
-          previousLiquidity
-        ) {
-          prices.set(
-            address,
-            parsedPrice,
-          );
-
-          bestLiquidity.set(
-            address,
-            liquidity,
-          );
-        }
-      }
-    } catch {
-      // Keep existing stored price if DexScreener temporarily fails.
-    }
-  }
-
-  return prices;
-}
 export async function recordSignalSnapshot(
   tokens: TerminalToken[],
   signals: SignalCall[],
@@ -447,13 +319,6 @@ export async function recordSignalSnapshot(
   const activeRecords = activeRows.map((row) =>
     normalizeRecord(row as DbRow),
   );
-  const trackedPrices =
-    await fetchTrackedTokenPrices(
-      activeRecords.map(
-        (record) =>
-          record.tokenAddress,
-      ),
-    );
 
   const activeIds = new Set(activeRecords.map((record) => record.signalId));
 
@@ -465,12 +330,7 @@ export async function recordSignalSnapshot(
     const signal = signalMap.get(record.signalId);
 
     const currentPrice =
-      trackedPrices.get(
-        record.tokenAddress,
-      ) ??
-      token?.priceUsd ??
-      signal?.priceUsd ??
-      record.currentPriceUsd;
+      token?.priceUsd ?? signal?.priceUsd ?? record.currentPriceUsd;
 
     const gain = gainPercent(record.entryPriceUsd, currentPrice);
 

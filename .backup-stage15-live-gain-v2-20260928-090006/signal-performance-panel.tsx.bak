@@ -731,7 +731,7 @@ export function SignalPerformancePanel({
               </h2>
             </div>
             <p className="mt-1 text-xs text-zinc-600">
-              Stored in PostgreSQL and refreshed from tracked market prices about every 10 seconds while this page is open.
+              Stored in PostgreSQL, not browser localStorage.
             </p>
           </div>
           <div className="text-[10px] text-zinc-700">
