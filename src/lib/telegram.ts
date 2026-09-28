@@ -261,27 +261,7 @@ export async function telegramSetCommands() {
         {
           command: "settings",
           description:
-            "Owner signal settings",
-        },
-        {
-          command: "preset",
-          description:
-            "Apply signal preset",
-        },
-        {
-          command: "setscore",
-          description:
-            "Set minimum signal score",
-        },
-        {
-          command: "setliq",
-          description:
-            "Set minimum liquidity",
-        },
-        {
-          command: "setage",
-          description:
-            "Set maximum pair age",
+            "Choose signal engine preset",
         },
         {
           command: "signals",
@@ -352,7 +332,7 @@ export async function telegramSetWebhook(
         "message",
         "callback_query",
       ],
-      drop_pending_updates: true,
+      drop_pending_updates: false,
     },
   );
 }

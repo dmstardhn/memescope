@@ -94,6 +94,7 @@ export async function POST(
       await recordSignalSnapshot(
         terminal.tokens,
         signals,
+        settings.confirmationScans,
       );
 
     return NextResponse.json({

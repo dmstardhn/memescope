@@ -220,8 +220,14 @@ export async function ensureSignalRecorderSchema() {
         signal_id TEXT PRIMARY KEY,
         visible BOOLEAN NOT NULL DEFAULT FALSE,
         armed BOOLEAN NOT NULL DEFAULT TRUE,
+        confirmation_count INTEGER NOT NULL DEFAULT 0,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `;
+
+    await sql`
+      ALTER TABLE memescope_signal_state
+      ADD COLUMN IF NOT EXISTS confirmation_count INTEGER NOT NULL DEFAULT 0
     `;
   })().catch((error) => {
     schemaPromise = null;
@@ -425,6 +431,7 @@ async function fetchTrackedTokenPrices(
 export async function recordSignalSnapshot(
   tokens: TerminalToken[],
   signals: SignalCall[],
+  confirmationScans = 1,
 ) {
   await ensureSignalRecorderSchema();
   const sql = sqlClient();
@@ -549,7 +556,7 @@ export async function recordSignalSnapshot(
   }
 
   const stateRows = await sql`
-    SELECT signal_id, visible, armed
+    SELECT signal_id, visible, armed, confirmation_count
     FROM memescope_signal_state
   `;
 
@@ -569,67 +576,151 @@ export async function recordSignalSnapshot(
     }),
   );
 
+  const confirmationCounts = new Map(
+    stateRows.map((raw) => {
+      const row = raw as DbRow;
+      return [
+        String(row.signal_id),
+        Math.max(
+          0,
+          Math.round(
+            Number(
+              row.confirmation_count ??
+                0,
+            ),
+          ),
+        ),
+      ] as [string, number];
+    }),
+  );
   // Disappearance re-arms the same signal for a future fresh occurrence.
   for (const [signalId, state] of states) {
     if (state.visible && !visibleIds.has(signalId)) {
       await sql`
         UPDATE memescope_signal_state
-        SET visible = FALSE, armed = TRUE, updated_at = NOW()
+        SET
+          visible = FALSE,
+          armed = TRUE,
+          confirmation_count = 0,
+          updated_at = NOW()
         WHERE signal_id = ${signalId}
       `;
       state.visible = false;
       state.armed = true;
+      confirmationCounts.set(
+        signalId,
+        0,
+      );
     }
   }
 
   let opened = 0;
 
-  // Stage 16: two-scan confirmation.
-  // First detection only arms the setup. A second consecutive detection opens it.
+  // Stage 19.2: preset-driven consecutive confirmation.
+  // A more aggressive preset can open on the first qualifying scan,
+  // while stricter presets require the setup to remain valid across
+  // multiple consecutive recorder scans.
+  const requiredConfirmations =
+    Math.max(
+      1,
+      Math.min(
+        4,
+        Math.round(
+          confirmationScans,
+        ),
+      ),
+    );
+
   for (const signal of watchSignals) {
     let state = states.get(signal.id);
     let mayOpen = false;
+    let count =
+      confirmationCounts.get(
+        signal.id,
+      ) ?? 0;
 
     if (!state) {
-      state = { visible: true, armed: true };
-      states.set(signal.id, state);
+      count = 1;
+      mayOpen =
+        count >=
+        requiredConfirmations;
+
+      state = {
+        visible: true,
+        armed: !mayOpen,
+      };
+      states.set(
+        signal.id,
+        state,
+      );
+      confirmationCounts.set(
+        signal.id,
+        count,
+      );
 
       await sql`
         INSERT INTO memescope_signal_state (
-          signal_id, visible, armed, updated_at
+          signal_id,
+          visible,
+          armed,
+          confirmation_count,
+          updated_at
         )
-        VALUES (${signal.id}, TRUE, TRUE, NOW())
+        VALUES (
+          ${signal.id},
+          TRUE,
+          ${!mayOpen},
+          ${count},
+          NOW()
+        )
         ON CONFLICT (signal_id)
         DO UPDATE SET
           visible = TRUE,
-          armed = TRUE,
+          armed = ${!mayOpen},
+          confirmation_count = ${count},
           updated_at = NOW()
       `;
-    } else if (!state.visible && state.armed) {
-      // Reappearance = confirmation scan #1.
-      state.visible = true;
-
-      await sql`
-        UPDATE memescope_signal_state
-        SET visible = TRUE, armed = TRUE, updated_at = NOW()
-        WHERE signal_id = ${signal.id}
-      `;
-    } else if (state.visible && state.armed) {
-      // Consecutive detection = confirmation scan #2.
-      mayOpen = true;
-      state.armed = false;
-
-      await sql`
-        UPDATE memescope_signal_state
-        SET visible = TRUE, armed = FALSE, updated_at = NOW()
-        WHERE signal_id = ${signal.id}
-      `;
     } else if (!state.visible) {
+      count = 1;
+      mayOpen =
+        count >=
+        requiredConfirmations;
+
       state.visible = true;
+      state.armed = !mayOpen;
+      confirmationCounts.set(
+        signal.id,
+        count,
+      );
 
       await sql`
         UPDATE memescope_signal_state
-        SET visible = TRUE, updated_at = NOW()
+        SET
+          visible = TRUE,
+          armed = ${!mayOpen},
+          confirmation_count = ${count},
+          updated_at = NOW()
+        WHERE signal_id = ${signal.id}
+      `;
+    } else if (state.armed) {
+      count += 1;
+      mayOpen =
+        count >=
+        requiredConfirmations;
+
+      state.armed = !mayOpen;
+      confirmationCounts.set(
+        signal.id,
+        count,
+      );
+
+      await sql`
+        UPDATE memescope_signal_state
+        SET
+          visible = TRUE,
+          armed = ${!mayOpen},
+          confirmation_count = ${count},
+          updated_at = NOW()
         WHERE signal_id = ${signal.id}
       `;
     }
