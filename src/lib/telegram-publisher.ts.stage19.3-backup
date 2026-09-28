@@ -927,7 +927,7 @@ export async function publishPendingTelegramSignals() {
       const message =
         await telegramSendMessage(
           channelId,
-          await channelText(record),
+          channelText(record),
           {
             replyMarkup:
               signalButtons(
