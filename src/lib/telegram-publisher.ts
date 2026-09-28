@@ -299,121 +299,409 @@ function signalButtons(
   };
 }
 
-function channelText(
+type TelegramMarketSnapshot = {
+  marketCapUsd: number | null;
+  liquidityUsd: number | null;
+  volume5mUsd: number | null;
+  buyPressure: number | null;
+  volumeSpike: number | null;
+  ageMinutes: number | null;
+};
+
+function compactMoney(
+  value: number | null,
+) {
+  if (
+    value === null ||
+    !Number.isFinite(value)
+  ) {
+    return "N/A";
+  }
+
+  if (value >= 1_000_000_000) {
+    return `$${(
+      value / 1_000_000_000
+    ).toFixed(2)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `$${(
+      value / 1_000_000
+    ).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `$${(
+      value / 1_000
+    ).toFixed(1)}K`;
+  }
+
+  return `$${value.toFixed(2)}`;
+}
+
+function ageText(
+  minutes: number | null,
+) {
+  if (
+    minutes === null ||
+    !Number.isFinite(minutes)
+  ) {
+    return "N/A";
+  }
+
+  if (minutes < 60) {
+    return `${Math.max(
+      1,
+      Math.round(minutes),
+    )}m`;
+  }
+
+  const hours =
+    minutes / 60;
+
+  if (hours < 24) {
+    return `${hours.toFixed(
+      hours >= 10 ? 0 : 1,
+    )}h`;
+  }
+
+  return `${(
+    hours / 24
+  ).toFixed(1)}d`;
+}
+
+async function fetchTelegramMarketSnapshot(
+  tokenAddress: string,
+): Promise<TelegramMarketSnapshot> {
+  const empty: TelegramMarketSnapshot = {
+    marketCapUsd: null,
+    liquidityUsd: null,
+    volume5mUsd: null,
+    buyPressure: null,
+    volumeSpike: null,
+    ageMinutes: null,
+  };
+
+  try {
+    const response = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(
+        tokenAddress,
+      )}`,
+      {
+        cache: "no-store",
+        signal:
+          AbortSignal.timeout(
+            6_000,
+          ),
+      },
+    );
+
+    if (!response.ok) {
+      return empty;
+    }
+
+    const body =
+      (await response.json()) as {
+        pairs?: Array<{
+          chainId?: string;
+          marketCap?: number;
+          fdv?: number;
+          pairCreatedAt?: number;
+          liquidity?: {
+            usd?: number;
+          };
+          volume?: {
+            m5?: number;
+            h1?: number;
+          };
+          txns?: {
+            m5?: {
+              buys?: number;
+              sells?: number;
+            };
+          };
+        }>;
+      };
+
+    const pairs =
+      (body.pairs ?? [])
+        .filter(
+          (pair) =>
+            pair.chainId ===
+            "solana",
+        )
+        .sort(
+          (a, b) =>
+            Number(
+              b.liquidity?.usd ??
+                0,
+            ) -
+            Number(
+              a.liquidity?.usd ??
+                0,
+            ),
+        );
+
+    const pair =
+      pairs[0];
+
+    if (!pair) {
+      return empty;
+    }
+
+    const buys =
+      Number(
+        pair.txns?.m5?.buys ??
+          0,
+      );
+
+    const sells =
+      Number(
+        pair.txns?.m5?.sells ??
+          0,
+      );
+
+    const totalTxns =
+      buys + sells;
+
+    const volume5m =
+      Number(
+        pair.volume?.m5 ??
+          0,
+      );
+
+    const volume1h =
+      Number(
+        pair.volume?.h1 ??
+          0,
+      );
+
+    const baseline5m =
+      volume1h > 0
+        ? volume1h / 12
+        : 0;
+
+    const createdAt =
+      Number(
+        pair.pairCreatedAt ??
+          0,
+      );
+
+    return {
+      marketCapUsd:
+        Number.isFinite(
+          Number(
+            pair.marketCap ??
+              pair.fdv,
+          ),
+        )
+          ? Number(
+              pair.marketCap ??
+                pair.fdv,
+            )
+          : null,
+
+      liquidityUsd:
+        Number.isFinite(
+          Number(
+            pair.liquidity?.usd,
+          ),
+        )
+          ? Number(
+              pair.liquidity?.usd,
+            )
+          : null,
+
+      volume5mUsd:
+        Number.isFinite(
+          volume5m,
+        )
+          ? volume5m
+          : null,
+
+      buyPressure:
+        totalTxns > 0
+          ? (buys /
+              totalTxns) *
+            100
+          : null,
+
+      volumeSpike:
+        baseline5m > 0
+          ? volume5m /
+            baseline5m
+          : null,
+
+      ageMinutes:
+        createdAt > 0
+          ? Math.max(
+              0,
+              (Date.now() -
+                createdAt) /
+                60_000,
+            )
+          : null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+async function channelText(
   record: SignalRecord,
 ) {
+  const market =
+    await fetchTelegramMarketSnapshot(
+      record.tokenAddress,
+    );
+
   const targetHit =
     record.status ===
     "target_hit";
 
   const title =
     targetHit
-      ? "✅ MEMESCOPE TARGET HIT"
-      : "🔥 MEMESCOPE HQ SIGNAL";
+      ? "\u2705 MEMESCOPE TARGET HIT"
+      : "\u26A1 MEMESCOPE SIGNAL";
 
   const status =
     targetHit
-      ? "TARGET HIT"
-      : "ACTIVE";
+      ? "\u2705 TARGET HIT"
+      : "\uD83D\uDFE2 ACTIVE";
 
   const reason =
     record.planReason
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 750);
+      .slice(0, 700);
+
+  const buyPressure =
+    market.buyPressure ===
+      null
+      ? "N/A"
+      : `${market.buyPressure.toFixed(
+          0,
+        )}%`;
+
+  const volumeSpike =
+    market.volumeSpike ===
+      null
+      ? "N/A"
+      : `${market.volumeSpike.toFixed(
+          2,
+        )}x`;
 
   return [
     `<b>${title}</b>`,
     "",
+    "\uD83D\uDFE2 <b>HIGH QUALITY SETUP</b>",
+    "",
     `<b>$${escapeTelegramHtml(
       record.symbol,
-    )}</b> — ${escapeTelegramHtml(
+    )}</b> | ${escapeTelegramHtml(
       record.name,
     )}`,
     "",
-    `Quality Score: <b>${Math.round(
+    "\u256D\u2500 <b>MARKET SNAPSHOT</b>",
+    `\u251C \uD83D\uDCB0 Market Cap     <b>${compactMoney(
+      market.marketCapUsd,
+    )}</b>`,
+    `\u251C \uD83D\uDCA7 Liquidity      <b>${compactMoney(
+      market.liquidityUsd,
+    )}</b>`,
+    `\u251C \uD83D\uDCCA Volume 5m      <b>${compactMoney(
+      market.volume5mUsd,
+    )}</b>`,
+    `\u251C \uD83D\uDD25 Volume Spike   <b>${volumeSpike}</b>`,
+    `\u251C \uD83D\uDFE2 Buy Pressure   <b>${buyPressure}</b>`,
+    `\u2570 \u23F1 Age            <b>${ageText(
+      market.ageMinutes,
+    )}</b>`,
+    "",
+    "\u256D\u2500 <b>SIGNAL</b>",
+    `\u251C \uD83C\uDFAF Quality Score  <b>${Math.round(
       record.scoreAtEntry,
-    )}/100</b>`,
-    `Entry: <b>${money(
+    )} / 100</b>`,
+    `\u251C \uD83D\uDCB5 Entry          <b>${money(
       record.entryPriceUsd,
     )}</b>`,
-    `Current: <b>${money(
+    `\u251C \uD83D\uDCC8 Current        <b>${money(
       record.currentPriceUsd,
     )}</b>`,
-    `Potential TP: <b>+${record.targetPercent.toFixed(
+    `\u251C \uD83D\uDE80 Potential TP   <b>+${record.targetPercent.toFixed(
       1,
     )}%</b>`,
-    record.targetPriceUsd ===
-    null
-      ? null
-      : `TP Price: <b>${money(
-          record.targetPriceUsd,
-        )}</b>`,
-    "",
-    `Current Gain: <b>${pct(
+    `\u251C \uD83D\uDCC8 Current Gain   <b>${pct(
       record.currentGainPercent,
     )}</b>`,
-    `Maximum Gain: <b>${pct(
+    `\u251C \uD83D\uDD1D Maximum Gain   <b>${pct(
       record.peakGainPercent,
     )}</b>`,
-    `Maximum Drawdown: <b>${pct(
+    `\u251C \uD83D\uDCC9 Max Drawdown   <b>${pct(
       record.maxDrawdownPercent,
     )}</b>`,
-    `Hold: <b>${holdText(
+    `\u251C \u23F3 Hold Time      <b>${holdText(
       record.openedAt,
       record.closedAt,
     )}</b>`,
-    `Status: <b>${status}</b>`,
+    `\u2570 Status         <b>${status}</b>`,
     "",
+    "\uD83D\uDCCC <b>Why MemeScope detected it</b>",
     reason
-      ? `<b>Why it passed</b>\n${escapeTelegramHtml(
+      ? `\u2022 ${escapeTelegramHtml(
           reason,
         )}`
-      : null,
+      : "\u2022 Market structure passed the MemeScope HQ filters.",
     "",
-    "<b>Contract Address</b>",
+    "\uD83D\uDCCB <b>Contract</b>",
     `<code>${escapeTelegramHtml(
       record.tokenAddress,
     )}</code>`,
     "",
-    "<i>Potential TP is a heuristic estimate from the confirmed setup, not a guaranteed future return.</i>",
-  ]
-    .filter(
-      (
-        value,
-      ): value is string =>
-        value !== null,
-    )
-    .join("\n");
+    "\u26A0\uFE0F <i>Potential TP is an analytical estimate based on the confirmed setup, not a guaranteed future return.</i>",
+    "",
+    "<b>MemeScope | MaxScalpLab</b>",
+  ].join("\n");
 }
 
 function targetReply(
   record: SignalRecord,
 ) {
   return [
-    `🎯 <b>TARGET HIT — $${escapeTelegramHtml(
-      record.symbol,
-    )}</b>`,
+    "\uD83C\uDFAF <b>MEMESCOPE TARGET HIT</b>",
     "",
-    `Potential TP: <b>+${record.targetPercent.toFixed(
+    `<b>$${escapeTelegramHtml(
+      record.symbol,
+    )}</b> | ${escapeTelegramHtml(
+      record.name,
+    )}`,
+    "",
+    `Entry            <b>${money(
+      record.entryPriceUsd,
+    )}</b>`,
+    `Potential TP     <b>+${record.targetPercent.toFixed(
       1,
     )}%</b>`,
-    `Observed Gain: <b>${pct(
+    `Observed Gain    <b>${pct(
       record.currentGainPercent,
     )}</b>`,
-    `Maximum Gain: <b>${pct(
+    "",
+    `Maximum Gain     <b>${pct(
       record.peakGainPercent,
     )}</b>`,
-    `Maximum Drawdown: <b>${pct(
+    `Max Drawdown     <b>${pct(
       record.maxDrawdownPercent,
     )}</b>`,
-    `Hold: <b>${holdText(
+    `Hold Time        <b>${holdText(
       record.openedAt,
       record.closedAt,
     )}</b>`,
+    "",
+    "\u2705 Potential target reached.",
+    "",
+    "<b>MemeScope | MaxScalpLab</b>",
   ].join("\n");
 }
-
 export async function ensureTelegramPublisherSchema() {
   if (schemaPromise) {
     return schemaPromise;
@@ -633,7 +921,7 @@ export async function publishPendingTelegramSignals() {
       const message =
         await telegramSendMessage(
           channelId,
-          channelText(record),
+          await channelText(record),
           {
             replyMarkup:
               signalButtons(
@@ -776,7 +1064,7 @@ export async function publishPendingTelegramSignals() {
       await telegramEditMessage(
         channelId,
         messageId,
-        channelText(record),
+        await channelText(record),
         signalButtons(record),
       );
 
