@@ -3,6 +3,17 @@ import {
 } from "next/server";
 
 import {
+  applySignalPreset,
+  getSignalEngineSettings,
+  resetSignalEngineSettings,
+  saveSignalEngineSettings,
+  signalPresetName,
+  type SignalPresetName,
+} from "@/lib/signal-engine-settings";
+import type {
+  SignalSettings,
+} from "@/lib/signal-types";
+import {
   escapeTelegramHtml,
   telegramConfig,
   telegramSendMessage,
@@ -16,6 +27,11 @@ type TelegramUpdate = {
     chat?: {
       id?: number;
     };
+    from?: {
+      id?: number;
+      username?: string;
+      first_name?: string;
+    };
   };
 };
 
@@ -27,16 +43,90 @@ function validSolanaAddress(
   );
 }
 
+function compactUsd(
+  value: number,
+) {
+  if (value >= 1_000_000) {
+    return `$${(
+      value / 1_000_000
+    ).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `$${(
+      value / 1_000
+    ).toFixed(0)}K`;
+  }
+
+  return `$${value.toFixed(0)}`;
+}
+
+function settingsText(
+  settings: SignalSettings,
+) {
+  const preset =
+    signalPresetName(
+      settings,
+    );
+
+  return [
+    "<b>MEMESCOPE OWNER CONTROL</b>",
+    "",
+    `Preset: <b>${escapeTelegramHtml(
+      preset.toUpperCase(),
+    )}</b>`,
+    "",
+    "<b>Owner-adjustable filters</b>",
+    `Minimum score: <b>${settings.minSignalScore}</b>`,
+    `Minimum liquidity: <b>${compactUsd(
+      settings.minLiquidityUsd,
+    )}</b>`,
+    `Maximum pair age: <b>${settings.maxPairAgeHours}h</b>`,
+    "",
+    "<b>Fixed Stage 16 HQ gates</b>",
+    "5m volume >= $10K",
+    "5m transactions >= 40",
+    "Buy pressure 60% - 88%",
+    "Volume spike 1.30x - 3.50x",
+    "5m momentum +2% - +15%",
+    "1h momentum -5% - +120%",
+    "Liquidity / valuation >= 8%",
+    "Confirmation: 2 consecutive scans",
+    "Potential TP: dynamic analysis-based",
+    "",
+    "<b>Commands</b>",
+    "/preset strict",
+    "/preset balanced",
+    "/preset broad",
+    "/setscore 85",
+    "/setliq 75000",
+    "/setage 18",
+    "/resetsettings",
+    "",
+    "<i>Changes apply to new signal detection. Existing records keep their original entry snapshot and target.</i>",
+  ].join("\n");
+}
+
 function helpText() {
   return [
-    "<b>MemeScope Bot</b>",
+    "<b>MemeScope Owner Bot</b>",
     "",
+    "<b>Engine control</b>",
+    "/settings - current live signal settings",
+    "/preset &lt;strict|balanced|broad&gt;",
+    "/setscore &lt;60-95&gt;",
+    "/setliq &lt;10000-1000000&gt;",
+    "/setage &lt;1-168 hours&gt;",
+    "/resetsettings - restore defaults",
+    "",
+    "<b>Monitoring</b>",
     "/signals - active HQ signals",
     "/history - recent signal history",
     "/stats - 30-day signal statistics",
     "/token &lt;CA&gt; - open token",
     "/risk &lt;CA&gt; - open risk analysis",
     "/channel - signal channel",
+    "/whoami - show your Telegram user ID",
     "/help - commands",
     "",
     "<i>Signal scores and Potential TP are analytical heuristics, not guaranteed returns.</i>",
@@ -84,6 +174,36 @@ function pct(
   return `${
     number > 0 ? "+" : ""
   }${number.toFixed(2)}%`;
+}
+
+async function reply(
+  chatId: number,
+  messageId: number | undefined,
+  text: string,
+) {
+  return telegramSendMessage(
+    chatId,
+    text,
+    {
+      replyToMessageId:
+        messageId,
+    },
+  );
+}
+
+function oneNumber(
+  value: string,
+) {
+  const number =
+    Number(
+      value.trim(),
+    );
+
+  return Number.isFinite(
+    number,
+  )
+    ? number
+    : null;
 }
 
 export async function POST(
@@ -136,6 +256,9 @@ export async function POST(
   const chatId =
     message?.chat?.id;
 
+  const userId =
+    message?.from?.id;
+
   const rawText =
     message?.text?.trim() ??
     "";
@@ -162,6 +285,72 @@ export async function POST(
   const argument =
     args.join(" ").trim();
 
+  if (
+    command === "/whoami"
+  ) {
+    await reply(
+      chatId,
+      message.message_id,
+      [
+        "<b>Telegram User ID</b>",
+        "",
+        `<code>${escapeTelegramHtml(
+          userId ??
+            "unknown",
+        )}</code>`,
+        "",
+        "Use this value as TELEGRAM_OWNER_ID in Vercel Production.",
+      ].join("\n"),
+    );
+
+    return NextResponse.json({
+      ok: true,
+    });
+  }
+
+  const ownerId =
+    process.env
+      .TELEGRAM_OWNER_ID
+      ?.trim() ??
+    "";
+
+  if (!ownerId) {
+    await reply(
+      chatId,
+      message.message_id,
+      [
+        "<b>Owner access is not configured.</b>",
+        "",
+        `Your Telegram User ID: <code>${escapeTelegramHtml(
+          userId ??
+            "unknown",
+        )}</code>`,
+        "",
+        "Set this as TELEGRAM_OWNER_ID in Vercel Production, redeploy, then bootstrap Telegram.",
+      ].join("\n"),
+    );
+
+    return NextResponse.json({
+      ok: true,
+    });
+  }
+
+  if (
+    !userId ||
+    String(userId) !==
+      ownerId
+  ) {
+    await reply(
+      chatId,
+      message.message_id,
+      "Unauthorized. This MemeScope bot is owner-only.",
+    );
+
+    return NextResponse.json({
+      ok: true,
+    });
+  }
+
   const origin =
     new URL(
       request.url,
@@ -175,13 +364,182 @@ export async function POST(
       command === "/start" ||
       command === "/help"
     ) {
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         helpText(),
-        {
-          replyToMessageId:
-            message.message_id,
-        },
+      );
+    } else if (
+      command === "/settings"
+    ) {
+      const settings =
+        await getSignalEngineSettings();
+
+      await reply(
+        chatId,
+        message.message_id,
+        settingsText(
+          settings,
+        ),
+      );
+    } else if (
+      command === "/preset"
+    ) {
+      const preset =
+        argument.toLowerCase();
+
+      if (
+        preset !== "strict" &&
+        preset !== "balanced" &&
+        preset !== "broad"
+      ) {
+        await reply(
+          chatId,
+          message.message_id,
+          "Usage: <code>/preset strict</code>, <code>/preset balanced</code>, or <code>/preset broad</code>.",
+        );
+      } else {
+        const settings =
+          await applySignalPreset(
+            preset as SignalPresetName,
+          );
+
+        await reply(
+          chatId,
+          message.message_id,
+          [
+            `<b>Preset updated: ${escapeTelegramHtml(
+              preset.toUpperCase(),
+            )}</b>`,
+            "",
+            settingsText(
+              settings,
+            ),
+          ].join("\n"),
+        );
+      }
+    } else if (
+      command === "/setscore"
+    ) {
+      const value =
+        oneNumber(
+          argument,
+        );
+
+      if (
+        value === null ||
+        value < 60 ||
+        value > 95
+      ) {
+        await reply(
+          chatId,
+          message.message_id,
+          "Usage: <code>/setscore 85</code> (allowed 60-95).",
+        );
+      } else {
+        const settings =
+          await saveSignalEngineSettings({
+            minSignalScore:
+              Math.round(
+                value,
+              ),
+          });
+
+        await reply(
+          chatId,
+          message.message_id,
+          settingsText(
+            settings,
+          ),
+        );
+      }
+    } else if (
+      command === "/setliq"
+    ) {
+      const value =
+        oneNumber(
+          argument,
+        );
+
+      if (
+        value === null ||
+        value < 10_000 ||
+        value > 1_000_000
+      ) {
+        await reply(
+          chatId,
+          message.message_id,
+          "Usage: <code>/setliq 75000</code> (allowed 10000-1000000 USD).",
+        );
+      } else {
+        const settings =
+          await saveSignalEngineSettings({
+            minLiquidityUsd:
+              Math.round(
+                value,
+              ),
+          });
+
+        await reply(
+          chatId,
+          message.message_id,
+          settingsText(
+            settings,
+          ),
+        );
+      }
+    } else if (
+      command === "/setage"
+    ) {
+      const value =
+        oneNumber(
+          argument,
+        );
+
+      if (
+        value === null ||
+        value < 1 ||
+        value > 168
+      ) {
+        await reply(
+          chatId,
+          message.message_id,
+          "Usage: <code>/setage 24</code> (allowed 1-168 hours).",
+        );
+      } else {
+        const settings =
+          await saveSignalEngineSettings({
+            maxPairAgeHours:
+              Math.round(
+                value,
+              ),
+          });
+
+        await reply(
+          chatId,
+          message.message_id,
+          settingsText(
+            settings,
+          ),
+        );
+      }
+    } else if (
+      command ===
+      "/resetsettings"
+    ) {
+      const settings =
+        await resetSignalEngineSettings();
+
+      await reply(
+        chatId,
+        message.message_id,
+        [
+          "<b>Default settings restored.</b>",
+          "",
+          settingsText(
+            settings,
+          ),
+        ].join("\n"),
       );
     } else if (
       command === "/signals"
@@ -224,12 +582,12 @@ export async function POST(
       const text =
         active.length === 0
           ? [
-              "🔥 <b>Active HQ Signals</b>",
+              "<b>Active HQ Signals</b>",
               "",
               "No active confirmed HQ signal right now.",
             ].join("\n")
           : [
-              "🔥 <b>Active HQ Signals</b>",
+              "<b>Active HQ Signals</b>",
               "",
               ...active.map(
                 (
@@ -238,7 +596,7 @@ export async function POST(
                 ) =>
                   `${index + 1}. <b>$${escapeTelegramHtml(
                     record.symbol,
-                  )}</b> — score ${Math.round(
+                  )}</b> - score ${Math.round(
                     Number(
                       record.scoreAtEntry ??
                         0,
@@ -258,13 +616,10 @@ export async function POST(
               "\n\n",
             );
 
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         text,
-        {
-          replyToMessageId:
-            message.message_id,
-        },
       );
     } else if (
       command === "/history"
@@ -290,7 +645,7 @@ export async function POST(
           : [];
 
       const text = [
-        "🗂 <b>Recent Signal History</b>",
+        "<b>Recent Signal History</b>",
         "",
         ...(records.length
           ? records.map(
@@ -300,7 +655,7 @@ export async function POST(
               ) =>
                 `${index + 1}. <b>$${escapeTelegramHtml(
                   record.symbol,
-                )}</b> — ${escapeTelegramHtml(
+                )}</b> - ${escapeTelegramHtml(
                   String(
                     record.status ??
                       "active",
@@ -320,13 +675,10 @@ export async function POST(
         "\n\n",
       );
 
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         text,
-        {
-          replyToMessageId:
-            message.message_id,
-        },
       );
     } else if (
       command === "/stats"
@@ -345,7 +697,7 @@ export async function POST(
         >;
 
       const text = [
-        "📊 <b>MemeScope — 30D Stats</b>",
+        "<b>MemeScope - 30D Stats</b>",
         "",
         `Signals: <b>${Number(
           analytics.total ?? 0,
@@ -370,13 +722,10 @@ export async function POST(
         "<i>Historical descriptive statistics are not future probabilities.</i>",
       ].join("\n");
 
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         text,
-        {
-          replyToMessageId:
-            message.message_id,
-        },
       );
     } else if (
       command === "/token" ||
@@ -387,13 +736,10 @@ export async function POST(
           argument,
         )
       ) {
-        await telegramSendMessage(
+        await reply(
           chatId,
+          message.message_id,
           `Usage: <code>${command} &lt;Solana CA&gt;</code>`,
-          {
-            replyToMessageId:
-              message.message_id,
-          },
         );
       } else {
         const encoded =
@@ -406,8 +752,8 @@ export async function POST(
           [
             command ===
             "/risk"
-              ? "🛡 <b>MemeScope Risk Analyzer</b>"
-              : "🔎 <b>MemeScope Token</b>",
+              ? "<b>MemeScope Risk Analyzer</b>"
+              : "<b>MemeScope Token</b>",
             "",
             `<code>${escapeTelegramHtml(
               argument,
@@ -440,40 +786,31 @@ export async function POST(
     } else if (
       command === "/channel"
     ) {
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         channelUrl
-          ? `📢 <a href="${escapeTelegramHtml(
+          ? `<a href="${escapeTelegramHtml(
               channelUrl,
             )}">Open MemeScope Signal Channel</a>`
           : "Signal channel URL is not configured yet.",
-        {
-          replyToMessageId:
-            message.message_id,
-        },
       );
     } else {
-      await telegramSendMessage(
+      await reply(
         chatId,
+        message.message_id,
         helpText(),
-        {
-          replyToMessageId:
-            message.message_id,
-        },
       );
     }
   } catch (error) {
-    await telegramSendMessage(
+    await reply(
       chatId,
+      message.message_id,
       `MemeScope bot error: ${escapeTelegramHtml(
         error instanceof Error
           ? error.message
           : "Unknown error.",
       )}`,
-      {
-        replyToMessageId:
-          message.message_id,
-      },
     ).catch(
       () => undefined,
     );

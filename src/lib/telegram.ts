@@ -235,6 +235,31 @@ export async function telegramSetCommands() {
     {
       commands: [
         {
+          command: "settings",
+          description:
+            "Owner signal settings",
+        },
+        {
+          command: "preset",
+          description:
+            "Apply signal preset",
+        },
+        {
+          command: "setscore",
+          description:
+            "Set minimum signal score",
+        },
+        {
+          command: "setliq",
+          description:
+            "Set minimum liquidity",
+        },
+        {
+          command: "setage",
+          description:
+            "Set maximum pair age",
+        },
+        {
           command: "signals",
           description:
             "Active HQ signals",
@@ -252,17 +277,22 @@ export async function telegramSetCommands() {
         {
           command: "token",
           description:
-            "Open a token by contract address",
+            "Open token by contract",
         },
         {
           command: "risk",
           description:
-            "Open MemeScope risk analysis",
+            "Open risk analysis",
         },
         {
           command: "channel",
           description:
-            "Open the signal channel",
+            "Open signal channel",
+        },
+        {
+          command: "whoami",
+          description:
+            "Show Telegram user ID",
         },
         {
           command: "help",
@@ -273,7 +303,6 @@ export async function telegramSetCommands() {
     },
   );
 }
-
 export async function telegramSetWebhook(
   origin: string,
 ) {
