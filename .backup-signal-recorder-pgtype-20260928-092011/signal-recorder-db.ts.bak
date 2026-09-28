@@ -506,12 +506,12 @@ export async function recordSignalSnapshot(
           last_updated_at = NOW(),
           current_price_usd = ${currentPrice},
           peak_price_usd = CASE
-            WHEN CAST(${currentPrice} AS DOUBLE PRECISION) IS NULL THEN peak_price_usd
+            WHEN ${currentPrice} IS NULL THEN peak_price_usd
             WHEN peak_price_usd IS NULL THEN ${currentPrice}
             ELSE GREATEST(peak_price_usd, ${currentPrice})
           END,
           trough_price_usd = CASE
-            WHEN CAST(${currentPrice} AS DOUBLE PRECISION) IS NULL THEN trough_price_usd
+            WHEN ${currentPrice} IS NULL THEN trough_price_usd
             WHEN trough_price_usd IS NULL THEN ${currentPrice}
             ELSE LEAST(trough_price_usd, ${currentPrice})
           END,
@@ -532,12 +532,12 @@ export async function recordSignalSnapshot(
           current_price_usd = ${currentPrice},
           exit_price_usd = ${currentPrice},
           peak_price_usd = CASE
-            WHEN CAST(${currentPrice} AS DOUBLE PRECISION) IS NULL THEN peak_price_usd
+            WHEN ${currentPrice} IS NULL THEN peak_price_usd
             WHEN peak_price_usd IS NULL THEN ${currentPrice}
             ELSE GREATEST(peak_price_usd, ${currentPrice})
           END,
           trough_price_usd = CASE
-            WHEN CAST(${currentPrice} AS DOUBLE PRECISION) IS NULL THEN trough_price_usd
+            WHEN ${currentPrice} IS NULL THEN trough_price_usd
             WHEN trough_price_usd IS NULL THEN ${currentPrice}
             ELSE LEAST(trough_price_usd, ${currentPrice})
           END,
