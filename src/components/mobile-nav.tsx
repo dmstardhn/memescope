@@ -1,7 +1,8 @@
-﻿"use client";
+"use client";
 
 import {
   BrainCircuit,
+  BellRing,
   Eye,
   Radar,
   Rocket,
@@ -13,6 +14,7 @@ import { usePathname } from "next/navigation";
 const items = [
   { href: "/scanner", label: "Scan", icon: Radar },
   { href: "/discover", label: "Discover", icon: Rocket },
+  { href: "/signals", label: "Signals", icon: BellRing },
   { href: "/analyst", label: "Analyst", icon: BrainCircuit },
   { href: "/wallets", label: "Wallets", icon: WalletCards },
   { href: "/watchlist", label: "Watch", icon: Eye },
@@ -23,7 +25,7 @@ export function MobileNav() {
 
   return (
     <nav className="fixed inset-x-3 bottom-3 z-50 rounded-2xl border border-white/10 bg-[#0b0e14]/95 p-1.5 shadow-2xl shadow-black/50 backdrop-blur-xl lg:hidden">
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-6">
         {items.map((item) => {
           const active =
             pathname === item.href ||
