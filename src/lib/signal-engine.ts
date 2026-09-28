@@ -2,10 +2,58 @@ import type {
   SignalCall,
   SignalConfidence,
   SignalKind,
+  SignalSettings,
 } from "@/lib/signal-types";
 import type { TerminalToken } from "@/lib/terminal-types";
 
-const HIGH_QUALITY_MIN_SCORE = 80;
+export const DEFAULT_SIGNAL_SETTINGS: SignalSettings = {
+  minSignalScore: 80,
+  minLiquidityUsd: 50_000,
+  maxPairAgeHours: 24,
+};
+
+export function normalizeSignalSettings(
+  input?: Partial<SignalSettings>,
+): SignalSettings {
+  const minSignalScore = Math.max(
+    60,
+    Math.min(
+      95,
+      Math.round(
+        Number(input?.minSignalScore) ||
+          DEFAULT_SIGNAL_SETTINGS.minSignalScore,
+      ),
+    ),
+  );
+
+  const minLiquidityUsd = Math.max(
+    10_000,
+    Math.min(
+      1_000_000,
+      Math.round(
+        Number(input?.minLiquidityUsd) ||
+          DEFAULT_SIGNAL_SETTINGS.minLiquidityUsd,
+      ),
+    ),
+  );
+
+  const maxPairAgeHours = Math.max(
+    1,
+    Math.min(
+      168,
+      Math.round(
+        Number(input?.maxPairAgeHours) ||
+          DEFAULT_SIGNAL_SETTINGS.maxPairAgeHours,
+      ),
+    ),
+  );
+
+  return {
+    minSignalScore,
+    minLiquidityUsd,
+    maxPairAgeHours,
+  };
+}
 
 function clamp(
   value: number,
@@ -144,6 +192,7 @@ function potentialTarget(
   spike: number,
   change5m: number,
   change1h: number,
+  minSignalScore: number,
 ) {
   const ageMinutes =
     token.pairAgeMinutes ?? 1_440;
@@ -151,7 +200,7 @@ function potentialTarget(
   let target = 15;
 
   target += clamp(
-    (score - HIGH_QUALITY_MIN_SCORE) * 0.7,
+    (score - minSignalScore) * 0.7,
     0,
     14,
   );
@@ -204,6 +253,7 @@ function buildCall(
   spike: number,
   change5m: number,
   change1h: number,
+  settings: SignalSettings,
   reasons: string[],
 ): SignalCall {
   const target =
@@ -214,6 +264,7 @@ function buildCall(
       spike,
       change5m,
       change1h,
+      settings.minSignalScore,
     );
 
   return {
@@ -268,7 +319,13 @@ function buildCall(
 
 export function generateSignals(
   tokens: TerminalToken[],
+  rawSettings?: Partial<SignalSettings>,
 ): SignalCall[] {
+  const settings =
+    normalizeSignalSettings(
+      rawSettings,
+    );
+
   const calls: SignalCall[] = [];
 
   for (const token of tokens) {
@@ -293,8 +350,8 @@ export function generateSignals(
       marketCap <= 0 ||
       ageMinutes === null ||
       ageMinutes < 10 ||
-      ageMinutes > 1_440 ||
-      token.liquidityUsd < 50_000 ||
+      ageMinutes > settings.maxPairAgeHours * 60 ||
+      token.liquidityUsd < settings.minLiquidityUsd ||
       token.volume.m5 < 10_000 ||
       txns5m < 40 ||
       buyShare === null ||
@@ -327,7 +384,7 @@ export function generateSignals(
 
     if (
       score <
-      HIGH_QUALITY_MIN_SCORE
+      settings.minSignalScore
     ) {
       continue;
     }
@@ -352,6 +409,7 @@ export function generateSignals(
         spike,
         change5m,
         change1h,
+        settings,
         [
           `Quality score is ${score}/100 after hard filtering.`,
           `Buy share is ${Math.round(

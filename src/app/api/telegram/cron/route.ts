@@ -2,11 +2,18 @@ import {
   NextResponse,
 } from "next/server";
 
+function secretValue() {
+  return (
+    process.env.CRON_SECRET?.trim() ??
+    ""
+  );
+}
+
 function authorized(
   request: Request,
 ) {
   const secret =
-    process.env.CRON_SECRET?.trim();
+    secretValue();
 
   return Boolean(
     secret &&
@@ -32,6 +39,9 @@ export async function GET(
     );
   }
 
+  const secret =
+    secretValue();
+
   const origin =
     new URL(
       request.url,
@@ -42,6 +52,10 @@ export async function GET(
       `${origin}/api/signals/record`,
       {
         method: "POST",
+        headers: {
+          authorization:
+            `Bearer ${secret}`,
+        },
         cache: "no-store",
       },
     );

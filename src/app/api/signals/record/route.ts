@@ -1,64 +1,126 @@
-import { NextResponse } from "next/server";
-import { generateSignals } from "@/lib/signal-engine";
+import {
+  NextResponse,
+} from "next/server";
+
+import {
+  generateSignals,
+} from "@/lib/signal-engine";
+import {
+  getSignalEngineSettings,
+} from "@/lib/signal-engine-settings";
 import {
   recordSignalSnapshot,
-  signalDatabaseConfigured,
 } from "@/lib/signal-recorder-db";
-import type { TerminalResponse } from "@/lib/terminal-types";
+import type {
+  TerminalResponse,
+} from "@/lib/terminal-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function run(request: Request) {
-  if (!signalDatabaseConfigured()) {
+function authorized(
+  request: Request,
+) {
+  const secret =
+    process.env.CRON_SECRET?.trim();
+
+  return Boolean(
+    secret &&
+      request.headers.get(
+        "authorization",
+      ) ===
+        `Bearer ${secret}`,
+  );
+}
+
+export async function POST(
+  request: Request,
+) {
+  if (!authorized(request)) {
     return NextResponse.json(
       {
-        configured: false,
-        error: "DATABASE_URL is not configured.",
+        ok: false,
+        error: "Unauthorized.",
       },
-      { status: 503 },
+      {
+        status: 401,
+      },
     );
   }
 
   try {
-    const terminalUrl = new URL("/api/terminal/solana", request.url);
+    const origin =
+      new URL(
+        request.url,
+      ).origin;
 
-    const response = await fetch(terminalUrl, {
-      cache: "no-store",
-      headers: {
-        "x-memescope-recorder": "1",
-      },
-    });
+    const response =
+      await fetch(
+        `${origin}/api/terminal/solana`,
+        {
+          cache: "no-store",
+        },
+      );
+
+    const body =
+      (await response.json()) as
+        | TerminalResponse
+        | {
+            error?: string;
+          };
 
     if (!response.ok) {
       throw new Error(
-        `Terminal snapshot failed with HTTP ${response.status}.`,
+        "error" in body
+          ? body.error ??
+              "Terminal feed failed."
+          : "Terminal feed failed.",
       );
     }
 
-    const terminal = (await response.json()) as TerminalResponse;
-    const signals = generateSignals(terminal.tokens);
+    const terminal =
+      body as TerminalResponse;
+
+    const settings =
+      await getSignalEngineSettings();
+
+    const signals =
+      generateSignals(
+        terminal.tokens,
+        settings,
+      );
+
+    const result =
+      await recordSignalSnapshot(
+        terminal.tokens,
+        signals,
+      );
 
     return NextResponse.json({
+      ok: true,
       configured: true,
-      ...(await recordSignalSnapshot(terminal.tokens, signals)),
+      ...result,
+      engineSettings:
+        settings,
     });
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Signal recorder failed.";
+
     return NextResponse.json(
       {
-        configured: true,
-        error:
-          error instanceof Error ? error.message : "Signal recorder failed.",
+        ok: false,
+        configured:
+          !message.includes(
+            "DATABASE_URL",
+          ),
+        error: message,
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
-}
-
-export async function POST(request: Request) {
-  return run(request);
-}
-
-export async function GET(request: Request) {
-  return run(request);
 }
