@@ -153,23 +153,23 @@ function presetText(
     "<b>Choose how selective the engine should be:</b>",
     "",
     "\uD83D\uDD25 <b>AGGRESSIVE</b> - more signals",
-    "Score >= 65 | Liquidity >= $25K | Age <= 48h | Confirm 1 scan",
+    "Score >= 65 | Liquidity >= $25K | Age &lt;= 48h | Confirm 1 scan",
     "",
     "\u2696\uFE0F <b>BALANCED</b> - standard HQ mode",
-    "Score >= 80 | Liquidity >= $50K | Age <= 24h | Confirm 1 scan",
+    "Score >= 80 | Liquidity >= $50K | Age &lt;= 24h | Confirm 1 scan",
     "",
     "\uD83D\uDEE1\uFE0F <b>STRICT</b> - fewer, tighter signals",
-    "Score >= 88 | Liquidity >= $100K | Age <= 12h | Confirm 1 scan",
+    "Score >= 88 | Liquidity >= $100K | Age &lt;= 12h | Confirm 1 scan",
     "",
     "\uD83D\uDD12 <b>ULTRA STRICT</b> - rarest signals",
-    "Score >= 92 | Liquidity >= $150K | Age <= 6h | Confirm 2 scans",
+    "Score >= 92 | Liquidity >= $150K | Age &lt;= 6h | Confirm 2 scans",
     "",
     "<b>Current values</b>",
     `Score >= ${settings.minSignalScore}`,
     `Liquidity >= ${money(
       settings.minLiquidityUsd,
     )}`,
-    `Max age <= ${settings.maxPairAgeHours}h`,
+    `Max age &lt;= ${settings.maxPairAgeHours}h`,
     `Confirmation = ${settings.confirmationScans} consecutive scan${
       settings.confirmationScans === 1
         ? ""
