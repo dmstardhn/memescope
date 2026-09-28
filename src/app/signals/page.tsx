@@ -44,9 +44,9 @@ const SEEN_KEY =
   "memescope-seen-signals-v1";
 
 const DEFAULT_SETTINGS: SignalSettings = {
-  minSignalScore: 55,
-  minLiquidityUsd: 20_000,
-  maxPairAgeHours: 72,
+  minSignalScore: 80,
+  minLiquidityUsd: 50_000,
+  maxPairAgeHours: 24,
 };
 
 function money(value: number | null) {
@@ -54,7 +54,7 @@ function money(value: number | null) {
     value === null ||
     !Number.isFinite(value)
   ) {
-    return "Ã¢â‚¬â€";
+    return "N/A";
   }
 
   if (value >= 1_000_000_000) {
@@ -77,7 +77,7 @@ function money(value: number | null) {
 }
 
 function percent(value: number | null) {
-  if (value === null) return "Ã¢â‚¬â€";
+  if (value === null) return "N/A";
 
   return `${value > 0 ? "+" : ""}${value.toFixed(
     2,
@@ -85,7 +85,7 @@ function percent(value: number | null) {
 }
 
 function age(minutes: number | null) {
-  if (minutes === null) return "Ã¢â‚¬â€";
+  if (minutes === null) return "N/A";
 
   if (minutes < 60) {
     return `${Math.floor(minutes)}m`;
@@ -109,7 +109,7 @@ function scoreTone(
     return "text-amber-300";
   }
 
-  if (signal.signalScore >= 75) {
+  if (signal.signalScore >= 90) {
     return "text-emerald-300";
   }
 
@@ -142,11 +142,11 @@ function buyRationale(
     const sellPercent =
       100 - buyPercent;
 
-    if (buyPercent >= 58) {
+    if (buyPercent >= 65) {
       points.push(
         `Buy pressure is dominant: ${buyPercent}% buys versus ${sellPercent}% sells in the latest 5m window.`,
       );
-    } else if (buyPercent >= 55) {
+    } else if (buyPercent >= 60) {
       points.push(
         `Buy pressure has an edge: ${buyPercent}% buys versus ${sellPercent}% sells in the latest 5m window.`,
       );
@@ -155,7 +155,7 @@ function buyRationale(
 
   if (
     signal.volumeSpike5m !== null &&
-    signal.volumeSpike5m >= 1.2
+    signal.volumeSpike5m >= 1.3
   ) {
     points.push(
       `Volume is expanding: the latest 5m pace is ${signal.volumeSpike5m.toFixed(
@@ -181,7 +181,7 @@ function buyRationale(
   if (
     signal.priceChange5m !== null &&
     signal.priceChange5m > 0 &&
-    signal.priceChange5m <= 18
+    signal.priceChange5m <= 15
   ) {
     points.push(
       `Short-term momentum is positive at ${percent(
@@ -206,28 +206,28 @@ function buyRationale(
   }
 
   let summary =
-    "MemeScope detected a BUY-watch setup because multiple short-window conditions are aligned.";
+    "MemeScope confirmed a high-quality momentum setup after strict market filters and repeated detection.";
 
   if (
     signal.buyShare5m !== null &&
-    signal.buyShare5m >= 0.58 &&
+    signal.buyShare5m >= 0.65 &&
     signal.volumeSpike5m !== null &&
-    signal.volumeSpike5m >= 1.5
+    signal.volumeSpike5m >= 1.7
   ) {
     summary =
-      "Main thesis: recent order flow favors buyers while volume is accelerating.";
+      "Main thesis: buyer pressure, controlled volume acceleration, liquidity depth, and momentum structure are aligned.";
   } else if (
     signal.volumeSpike5m !== null &&
-    signal.volumeSpike5m >= 2
+    signal.volumeSpike5m >= 2.5
   ) {
     summary =
-      "Main thesis: activity has accelerated sharply versus the token's recent volume baseline.";
+      "Main thesis: activity is accelerating inside the engine's preferred non-extreme range.";
   } else if (
     signal.buyShare5m !== null &&
-    signal.buyShare5m >= 0.56
+    signal.buyShare5m >= 0.60
   ) {
     summary =
-      "Main thesis: recent transaction flow currently favors buyers.";
+      "Main thesis: recent transaction flow favors buyers while the hard quality gates remain satisfied.";
   }
 
   return {
@@ -302,7 +302,7 @@ function SignalCard({
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-3 gap-2 lg:grid-cols-6">
+      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         <div className="rounded-xl bg-black/20 p-3">
           <div className="text-[10px] text-zinc-600">
             Price
@@ -365,7 +365,16 @@ function SignalCard({
               ? `${Math.round(
                   signal.buyShare5m * 100,
                 )}%`
-              : "Ã¢â‚¬â€"}
+              : "N/A"}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.035] p-3">
+          <div className="text-[10px] text-zinc-600">
+            Potential TP
+          </div>
+          <div className="mt-1 text-xs font-semibold text-emerald-300">
+            +{signal.potentialTargetPercent.toFixed(1)}%
           </div>
         </div>
       </div>
@@ -411,7 +420,7 @@ function SignalCard({
 
           {signal.direction === "watch" && (
             <div className="mt-3 text-[10px] leading-4 text-zinc-700">
-              Rule-based setup rationale only. Signal score ranks matching conditions; it is not a win probability or guaranteed entry.
+              High-quality classification requires strict market filters plus two consecutive detections. Score is not a win probability and Potential TP is not guaranteed.
             </div>
           )}
         </div>
@@ -470,7 +479,7 @@ function SignalCard({
                 ? `${signal.volumeSpike5m.toFixed(
                     2,
                   )}x`
-                : "Ã¢â‚¬â€"}
+                : "N/A"}
             </strong>
           </span>
         </div>
@@ -525,6 +534,16 @@ export default function SignalsPage() {
 
   const initialLoadRef =
     useRef(true);
+
+  const confirmationRef =
+    useRef<Map<string, number>>(
+      new Map(),
+    );
+
+  const [confirmedIds, setConfirmedIds] =
+    useState<Set<string>>(
+      new Set(),
+    );
 
   useEffect(() => {
     const raw =
@@ -597,7 +616,7 @@ export default function SignalsPage() {
       () => {
         void load(true);
       },
-      15_000,
+      10_000,
     );
 
     return () =>
@@ -610,11 +629,69 @@ export default function SignalsPage() {
     );
   }, [data]);
 
+  useEffect(() => {
+    const liveIds = new Set(
+      allSignals.map(
+        (signal) => signal.id,
+      ),
+    );
+
+    for (
+      const id of Array.from(
+        confirmationRef.current.keys(),
+      )
+    ) {
+      if (!liveIds.has(id)) {
+        confirmationRef.current.delete(id);
+      }
+    }
+
+    for (const signal of allSignals) {
+      const previous =
+        confirmationRef.current.get(
+          signal.id,
+        ) ?? 0;
+
+      confirmationRef.current.set(
+        signal.id,
+        Math.min(2, previous + 1),
+      );
+    }
+
+    setConfirmedIds(
+      new Set(
+        Array.from(
+          confirmationRef.current.entries(),
+        )
+          .filter(
+            ([, count]) =>
+              count >= 2,
+          )
+          .map(([id]) => id),
+      ),
+    );
+  }, [allSignals]);
+
+  const confirmedSignals =
+    useMemo(
+      () =>
+        allSignals.filter(
+          (signal) =>
+            confirmedIds.has(
+              signal.id,
+            ),
+        ),
+      [
+        allSignals,
+        confirmedIds,
+      ],
+    );
+
   const visibleSignals = useMemo(() => {
     const needle =
       query.trim().toLowerCase();
 
-    return allSignals.filter(
+    return confirmedSignals.filter(
       (signal) => {
         if (
           signal.signalScore <
@@ -660,7 +737,7 @@ export default function SignalsPage() {
       },
     );
   }, [
-    allSignals,
+    confirmedSignals,
     query,
     settings,
   ]);
@@ -725,9 +802,9 @@ export default function SignalsPage() {
       3,
     )) {
       new Notification(
-        `MemeScope Ã‚Â· ${signal.label}`,
+        `MemeScope - ${signal.label}`,
         {
-          body: `${signal.symbol} Ã‚Â· score ${signal.signalScore} Ã‚Â· liq ${money(
+          body: `${signal.symbol} - score ${signal.signalScore} - liq ${money(
             signal.liquidityUsd,
           )}`,
         },
@@ -794,12 +871,10 @@ export default function SignalsPage() {
           </h1>
 
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">
-            Evidence-based market setups from
-            liquidity, transaction flow, volume
-            acceleration, pair age and short-window
-            momentum. These are market alerts, not
-            guaranteed outcomes or personalized
-            investment recommendations.
+            High-quality market setups filtered by liquidity, transaction
+            participation, controlled volume acceleration, buy pressure,
+            valuation depth, pair age and 5m/1h momentum. A setup must persist
+            across two consecutive scans before it is confirmed.
           </p>
         </div>
 
@@ -844,7 +919,7 @@ export default function SignalsPage() {
       <section className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
         <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
           <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-600">
-            Active watch calls
+            Confirmed HQ signals
           </div>
           <div className="mt-1 text-2xl font-semibold text-emerald-300">
             {watchSignals.length}
@@ -853,10 +928,10 @@ export default function SignalsPage() {
 
         <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
           <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-600">
-            Caution flags
+            Confirmation
           </div>
-          <div className="mt-1 text-2xl font-semibold text-amber-300">
-            {cautionSignals.length}
+          <div className="mt-1 text-2xl font-semibold text-cyan-300">
+            2x
           </div>
         </div>
 
@@ -874,7 +949,7 @@ export default function SignalsPage() {
             Refresh
           </div>
           <div className="mt-1 text-2xl font-semibold text-white">
-            15s
+            10s
           </div>
         </div>
       </section>
@@ -901,7 +976,7 @@ export default function SignalsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {[45, 55, 65, 75].map((value) => (
+              {[80, 85, 90, 95].map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -930,11 +1005,10 @@ export default function SignalsPage() {
 
             <div className="flex flex-wrap gap-2">
               {[
-                { value: 0, label: "Any" },
-                { value: 5000, label: "$5K+" },
-                { value: 20000, label: "$20K+" },
                 { value: 50000, label: "$50K+" },
+                { value: 75000, label: "$75K+" },
                 { value: 100000, label: "$100K+" },
+                { value: 250000, label: "$250K+" },
               ].map((item) => (
                 <button
                   key={item.value}
@@ -964,11 +1038,9 @@ export default function SignalsPage() {
 
             <div className="flex flex-wrap gap-2">
               {[
-                { value: 0, label: "Any" },
                 { value: 6, label: "6h max" },
+                { value: 12, label: "12h max" },
                 { value: 24, label: "24h max" },
-                { value: 72, label: "3d max" },
-                { value: 168, label: "7d max" },
               ].map((item) => (
                 <button
                   key={item.value}
@@ -1021,7 +1093,7 @@ export default function SignalsPage() {
       {loading && !data ? (
         <div className="flex min-h-[400px] items-center justify-center gap-2 rounded-2xl border border-white/10 text-sm text-zinc-500">
           <RefreshCw className="h-4 w-4 animate-spin" />
-          Building signal feedÃ¢â‚¬Â¦
+          Building signal feed...
         </div>
       ) : (
         <div className="space-y-8">
@@ -1031,18 +1103,17 @@ export default function SignalsPage() {
                 <div className="flex items-center gap-2">
                   <Zap className="h-4 w-4 text-emerald-300" />
                   <h2 className="text-lg font-semibold text-white">
-                    Market Calls
+                    High Quality Signals
                   </h2>
                 </div>
 
                 <p className="mt-1 text-xs text-zinc-600">
-                  Current setups meeting your
-                  minimum filters.
+                  Strict-filter setups confirmed in two consecutive scans.
                 </p>
               </div>
 
               <span className="text-xs text-zinc-700">
-                {watchSignals.length} calls
+                {watchSignals.length} HQ calls
               </span>
             </div>
 
@@ -1062,8 +1133,7 @@ export default function SignalsPage() {
                 <Sparkles className="mx-auto h-6 w-6 text-zinc-700" />
 
                 <p className="mt-3 text-sm text-zinc-600">
-                  No current market setup meets the
-                  selected thresholds.
+                  No setup currently passes the high-quality filters and two-scan confirmation.
                 </p>
               </div>
             )}
@@ -1093,17 +1163,16 @@ export default function SignalsPage() {
         </div>
       )}
       <SignalPerformancePanel
-        signals={allSignals}
+        signals={confirmedSignals}
         tokens={data?.tokens ?? []}
       />
 
 
       <div className="mt-6 rounded-xl border border-white/5 bg-black/20 p-4 text-[11px] leading-5 text-zinc-600">
-        Signal Score ranks how strongly a token
-        matches the current rule set. It is not a
-        probability of profit, price target, or
-        guarantee. Always verify token risk,
-        liquidity and on-chain context separately.
+        Signal Score measures alignment with the Stage 16 quality rules.
+        Potential TP is a heuristic upside estimate from the confirmed entry
+        snapshot, not a guaranteed future price. Contract and holder risk should
+        still be verified separately with Analyze Risk.
       </div>
     </main>
   );

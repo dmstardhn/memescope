@@ -92,9 +92,6 @@ function targetPrice(entry: number, pct: number) {
   return entry * (1 + pct / 100);
 }
 
-function stopPrice(entry: number, pct: number) {
-  return entry * (1 - pct / 100);
-}
 
 function normalizeRecord(row: DbRow): StoredSignalRecord {
   const rawStatus = String(row.status ?? "active");
@@ -492,8 +489,6 @@ export async function recordSignalSnapshot(
 
     if (gain !== null && gain >= record.targetPercent) {
       status = "target_hit";
-    } else if (gain !== null && gain <= -record.stopLossPercent) {
-      status = "stop_loss";
     }
 
     const visible = visibleIds.has(record.signalId);
@@ -589,29 +584,39 @@ export async function recordSignalSnapshot(
 
   let opened = 0;
 
+  // Stage 16: two-scan confirmation.
+  // First detection only arms the setup. A second consecutive detection opens it.
   for (const signal of watchSignals) {
     let state = states.get(signal.id);
     let mayOpen = false;
 
     if (!state) {
-      mayOpen = true;
-      state = { visible: true, armed: false };
+      state = { visible: true, armed: true };
       states.set(signal.id, state);
 
       await sql`
         INSERT INTO memescope_signal_state (
           signal_id, visible, armed, updated_at
         )
-        VALUES (${signal.id}, TRUE, FALSE, NOW())
+        VALUES (${signal.id}, TRUE, TRUE, NOW())
         ON CONFLICT (signal_id)
         DO UPDATE SET
           visible = TRUE,
-          armed = FALSE,
+          armed = TRUE,
           updated_at = NOW()
       `;
     } else if (!state.visible && state.armed) {
-      mayOpen = true;
+      // Reappearance = confirmation scan #1.
       state.visible = true;
+
+      await sql`
+        UPDATE memescope_signal_state
+        SET visible = TRUE, armed = TRUE, updated_at = NOW()
+        WHERE signal_id = ${signal.id}
+      `;
+    } else if (state.visible && state.armed) {
+      // Consecutive detection = confirmation scan #2.
+      mayOpen = true;
       state.armed = false;
 
       await sql`
@@ -686,7 +691,7 @@ export async function recordSignalSnapshot(
         ${plan.targetPercent},
         ${plan.stopLossPercent},
         ${targetPrice(entry, plan.targetPercent)},
-        ${stopPrice(entry, plan.stopLossPercent)},
+        NULL,
         ${plan.mode},
         ${plan.style},
         ${plan.reason},

@@ -47,6 +47,9 @@ export type SignalCall = {
 
   activityScore: number;
 
+  potentialTargetPercent: number;
+  potentialTargetReason: string;
+
   reasons: string[];
   caution: string[];
   dexUrl: string | null;

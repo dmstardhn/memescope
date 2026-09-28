@@ -5,12 +5,18 @@ import type {
 } from "@/lib/signal-types";
 import type { TerminalToken } from "@/lib/terminal-types";
 
+const HIGH_QUALITY_MIN_SCORE = 80;
+
 function clamp(
   value: number,
   min: number,
   max: number,
 ) {
   return Math.max(min, Math.min(max, value));
+}
+
+function half(value: number) {
+  return Math.round(value * 2) / 2;
 }
 
 function getBuyShare(token: TerminalToken) {
@@ -27,54 +33,166 @@ function confidenceFor(
   let complete = 0;
 
   if (token.priceUsd !== null) complete += 1;
-  if (token.marketCap !== null || token.fdv !== null) {
-    complete += 1;
-  }
+  if (token.marketCap !== null || token.fdv !== null) complete += 1;
   if (token.liquidityUsd > 0) complete += 1;
   if (token.volume.m5 > 0) complete += 1;
   if (token.pairAgeMinutes !== null) complete += 1;
   if (token.volumeSpike5m !== null) complete += 1;
+  if (token.priceChange.h1 !== null) complete += 1;
 
-  if (complete >= 6) return "high";
-  if (complete >= 4) return "medium";
+  if (complete >= 7) return "high";
+  if (complete >= 5) return "medium";
   return "limited";
 }
 
-function baseScore(token: TerminalToken) {
-  const buyShare = getBuyShare(token);
-  const spike = token.volumeSpike5m ?? 0;
-  const change5m = token.priceChange.m5 ?? 0;
+function liquidityToMarketCap(token: TerminalToken) {
+  const marketCap = token.marketCap ?? token.fdv;
+
+  if (
+    marketCap === null ||
+    marketCap <= 0
+  ) {
+    return null;
+  }
+
+  return token.liquidityUsd / marketCap;
+}
+
+function qualityScore(
+  token: TerminalToken,
+  buyShare: number,
+  spike: number,
+  change5m: number,
+  change1h: number,
+) {
   const txns5m =
     token.txns.m5.buys +
     token.txns.m5.sells;
 
-  let score = token.activityScore * 0.38;
+  const liqRatio =
+    liquidityToMarketCap(token) ?? 0;
 
-  if (token.liquidityUsd >= 100_000) score += 12;
-  else if (token.liquidityUsd >= 50_000) score += 10;
-  else if (token.liquidityUsd >= 20_000) score += 7;
-  else if (token.liquidityUsd >= 5_000) score += 3;
+  const ageMinutes =
+    token.pairAgeMinutes ??
+    Number.POSITIVE_INFINITY;
 
-  score += clamp(spike * 5, 0, 18);
+  let score = 0;
 
-  if (buyShare !== null) {
-    score += clamp(
-      (buyShare - 0.5) * 50,
-      0,
-      12,
-    );
-  }
+  // Liquidity depth: max 15.
+  if (token.liquidityUsd >= 250_000) score += 15;
+  else if (token.liquidityUsd >= 150_000) score += 13;
+  else if (token.liquidityUsd >= 100_000) score += 11;
+  else if (token.liquidityUsd >= 75_000) score += 9;
+  else score += 7;
 
-  if (txns5m >= 100) score += 8;
-  else if (txns5m >= 50) score += 6;
-  else if (txns5m >= 20) score += 4;
-  else if (txns5m >= 8) score += 2;
+  // Current volume: max 10.
+  if (token.volume.m5 >= 75_000) score += 10;
+  else if (token.volume.m5 >= 40_000) score += 9;
+  else if (token.volume.m5 >= 25_000) score += 8;
+  else if (token.volume.m5 >= 15_000) score += 7;
+  else score += 5;
 
-  if (change5m > 0 && change5m <= 20) {
-    score += clamp(change5m / 3, 0, 7);
-  }
+  // Transaction participation: max 10.
+  if (txns5m >= 250) score += 10;
+  else if (txns5m >= 150) score += 9;
+  else if (txns5m >= 100) score += 8;
+  else if (txns5m >= 70) score += 7;
+  else score += 5;
+
+  // Buy pressure: max 15. Extremely one-sided flow gets no extra bonus.
+  if (buyShare >= 0.68 && buyShare <= 0.80) score += 15;
+  else if (buyShare >= 0.64 && buyShare <= 0.84) score += 13;
+  else if (buyShare >= 0.60 && buyShare <= 0.88) score += 10;
+
+  // Volume acceleration: max 15. Extreme spikes are intentionally not rewarded.
+  if (spike >= 1.7 && spike <= 2.5) score += 15;
+  else if (spike >= 1.45 && spike <= 3.0) score += 13;
+  else if (spike >= 1.3 && spike <= 3.5) score += 10;
+
+  // 5m price structure: max 15. Best zone is constructive, not parabolic.
+  if (change5m >= 4 && change5m <= 9) score += 15;
+  else if (change5m >= 2 && change5m <= 12) score += 12;
+  else if (change5m > 12 && change5m <= 15) score += 8;
+
+  // 1h structure: max 8. Already-parabolic moves receive less credit.
+  if (change1h >= 0 && change1h <= 40) score += 8;
+  else if (change1h > 40 && change1h <= 80) score += 6;
+  else if (change1h > 80 && change1h <= 120) score += 3;
+  else if (change1h >= -5 && change1h < 0) score += 4;
+
+  // Pool depth relative to valuation: max 7.
+  if (liqRatio >= 0.20) score += 7;
+  else if (liqRatio >= 0.15) score += 6;
+  else if (liqRatio >= 0.10) score += 5;
+  else if (liqRatio >= 0.08) score += 4;
+
+  // Pair age: max 3.
+  if (ageMinutes >= 20 && ageMinutes <= 360) score += 3;
+  else if (ageMinutes >= 10 && ageMinutes <= 720) score += 2;
+  else score += 1;
+
+  // Existing activity score contributes only a small final weight.
+  score += clamp(token.activityScore / 35, 0, 2);
 
   return Math.round(clamp(score, 0, 100));
+}
+
+function potentialTarget(
+  token: TerminalToken,
+  score: number,
+  buyShare: number,
+  spike: number,
+  change5m: number,
+  change1h: number,
+) {
+  const ageMinutes =
+    token.pairAgeMinutes ?? 1_440;
+
+  let target = 15;
+
+  target += clamp(
+    (score - HIGH_QUALITY_MIN_SCORE) * 0.7,
+    0,
+    14,
+  );
+
+  target += clamp(
+    change5m * 0.7,
+    0,
+    10.5,
+  );
+
+  target += clamp(
+    Math.max(0, change1h) * 0.12,
+    0,
+    7.2,
+  );
+
+  target += clamp(
+    (spike - 1.3) * 5,
+    0,
+    11,
+  );
+
+  target += clamp(
+    (buyShare - 0.60) * 40,
+    0,
+    10,
+  );
+
+  if (token.liquidityUsd >= 250_000) target += 6;
+  else if (token.liquidityUsd >= 100_000) target += 3;
+
+  if (ageMinutes < 120) target += 5;
+  else if (ageMinutes < 360) target += 3;
+
+  // Do not extrapolate an already-extended move into a huge target.
+  if (change1h > 80) target -= 8;
+  if (change5m > 12) target -= 5;
+
+  return half(
+    clamp(target, 18, 70),
+  );
 }
 
 function buildCall(
@@ -82,25 +200,34 @@ function buildCall(
   kind: SignalKind,
   label: string,
   score: number,
+  buyShare: number,
+  spike: number,
+  change5m: number,
+  change1h: number,
   reasons: string[],
-  caution: string[],
-  direction: "watch" | "caution" = "watch",
 ): SignalCall {
+  const target =
+    potentialTarget(
+      token,
+      score,
+      buyShare,
+      spike,
+      change5m,
+      change1h,
+    );
+
   return {
-    id: `${token.address}-${kind}`,
+    id: `${token.address}-${kind}-hq16`,
     tokenAddress: token.address,
     symbol: token.symbol,
     name: token.name,
     imageUrl: token.imageUrl,
 
     kind,
-    direction,
+    direction: "watch",
     label,
 
-    signalScore: Math.round(
-      clamp(score, 0, 100),
-    ),
-
+    signalScore: score,
     confidence: confidenceFor(token),
 
     detectedAt: Date.now(),
@@ -118,14 +245,23 @@ function buildCall(
 
     buys5m: token.txns.m5.buys,
     sells5m: token.txns.m5.sells,
-    buyShare5m: getBuyShare(token),
+    buyShare5m: buyShare,
     volumeSpike5m: token.volumeSpike5m,
     pairAgeMinutes: token.pairAgeMinutes,
 
     activityScore: token.activityScore,
 
+    potentialTargetPercent: target,
+    potentialTargetReason:
+      `Estimated upside potential +${target.toFixed(1)}% from the confirmed entry snapshot, ` +
+      `based on quality score ${score}, ${Math.round(buyShare * 100)}% buy share, ` +
+      `${spike.toFixed(2)}x volume acceleration, liquidity depth, pair age, and 5m/1h structure.`,
+
     reasons,
-    caution,
+    caution: [
+      "Potential TP is a heuristic estimate from the entry snapshot, not a guaranteed price objective.",
+      "High-quality market structure does not by itself verify mint authority, holder concentration, or other on-chain contract risks.",
+    ],
     dexUrl: token.dexUrl,
   };
 }
@@ -137,204 +273,114 @@ export function generateSignals(
 
   for (const token of tokens) {
     const buyShare = getBuyShare(token);
-    const spike = token.volumeSpike5m ?? 0;
-    const change5m = token.priceChange.m5 ?? 0;
-    const change1h = token.priceChange.h1 ?? 0;
-    const ageMinutes =
-      token.pairAgeMinutes ??
-      Number.POSITIVE_INFINITY;
+    const spike = token.volumeSpike5m;
+    const change5m = token.priceChange.m5;
+    const change1h = token.priceChange.h1;
+    const ageMinutes = token.pairAgeMinutes;
+    const marketCap = token.marketCap ?? token.fdv;
+    const liqRatio = liquidityToMarketCap(token);
 
     const txns5m =
       token.txns.m5.buys +
       token.txns.m5.sells;
 
-    const base = baseScore(token);
-
+    // Stage 16 hard-quality gate.
+    // Volume spikes alone never create a signal.
     if (
-      ageMinutes <= 360 &&
-      token.liquidityUsd >= 20_000 &&
-      token.volume.m5 >= 8_000 &&
-      spike >= 1.5 &&
-      (buyShare ?? 0) >= 0.56 &&
-      change5m > -5 &&
-      change5m <= 22
+      token.priceUsd === null ||
+      token.priceUsd <= 0 ||
+      marketCap === null ||
+      marketCap <= 0 ||
+      ageMinutes === null ||
+      ageMinutes < 10 ||
+      ageMinutes > 1_440 ||
+      token.liquidityUsd < 50_000 ||
+      token.volume.m5 < 10_000 ||
+      txns5m < 40 ||
+      buyShare === null ||
+      buyShare < 0.60 ||
+      buyShare > 0.88 ||
+      spike === null ||
+      spike < 1.3 ||
+      spike > 3.5 ||
+      change5m === null ||
+      change5m < 2 ||
+      change5m > 15 ||
+      change1h === null ||
+      change1h < -5 ||
+      change1h > 120 ||
+      liqRatio === null ||
+      liqRatio < 0.08 ||
+      confidenceFor(token) === "limited"
     ) {
-      const reasons = [
-        `Pair age is ${Math.max(
-          1,
-          Math.round(ageMinutes),
-        )} minutes.`,
-        `5m volume is $${Math.round(
-          token.volume.m5,
-        ).toLocaleString("en-US")}.`,
-        `5m activity is ${spike.toFixed(
-          2,
-        )}x the 1h average 5m pace.`,
-        `Buy share is ${Math.round(
-          (buyShare ?? 0) * 100,
-        )}%.`,
-      ];
-
-      const caution: string[] = [];
-
-      if (token.liquidityUsd < 50_000) {
-        caution.push(
-          "Liquidity is still relatively thin.",
-        );
-      }
-
-      if (change5m >= 15) {
-        caution.push(
-          "Price has already moved quickly in the last 5 minutes.",
-        );
-      }
-
-      calls.push(
-        buildCall(
-          token,
-          "early-momentum",
-          "Early Momentum Watch",
-          base + 8,
-          reasons,
-          caution,
-        ),
-      );
-
       continue;
     }
 
-    if (
-      token.liquidityUsd >= 50_000 &&
-      token.volume.m5 >= 15_000 &&
-      spike >= 1.2 &&
-      (buyShare ?? 0) >= 0.58 &&
-      txns5m >= 20 &&
-      change5m > 0 &&
-      change5m <= 18
-    ) {
-      calls.push(
-        buildCall(
-          token,
-          "momentum",
-          "Momentum Watch",
-          base + 5,
-          [
-            `Liquidity is $${Math.round(
-              token.liquidityUsd,
-            ).toLocaleString("en-US")}.`,
-            `Buy share is ${Math.round(
-              (buyShare ?? 0) * 100,
-            )}% across ${txns5m} recent 5m transactions.`,
-            `5m price change is ${change5m.toFixed(
-              1,
-            )}%.`,
-          ],
-          change1h >= 40
-            ? [
-                "The 1h move is already extended; continuation is less certain.",
-              ]
-            : [],
-        ),
+    const score =
+      qualityScore(
+        token,
+        buyShare,
+        spike,
+        change5m,
+        change1h,
       );
 
+    if (
+      score <
+      HIGH_QUALITY_MIN_SCORE
+    ) {
       continue;
     }
 
-    if (
-      spike >= 2.5 &&
-      token.volume.m5 >= 10_000 &&
-      token.liquidityUsd >= 15_000 &&
-      txns5m >= 15
-    ) {
-      calls.push(
-        buildCall(
-          token,
-          "volume-spike",
-          "Volume Spike Watch",
-          base + 2,
-          [
-            `5m volume is ${spike.toFixed(
-              2,
-            )}x the recent 1h average pace.`,
-            `${txns5m} transactions were observed in the 5m window.`,
-            `Liquidity is $${Math.round(
-              token.liquidityUsd,
-            ).toLocaleString("en-US")}.`,
-          ],
-          (buyShare ?? 0.5) < 0.5
-            ? [
-                "The spike is not currently dominated by buys.",
-              ]
-            : [],
-        ),
-      );
+    const kind: SignalKind =
+      ageMinutes <= 180
+        ? "early-momentum"
+        : "momentum";
 
-      continue;
-    }
+    const label =
+      ageMinutes <= 180
+        ? "High Quality Early Momentum"
+        : "High Quality Momentum";
 
-    if (
-      change5m >= 25 &&
-      spike >= 2 &&
-      token.volume.m5 >= 10_000
-    ) {
-      calls.push(
-        buildCall(
-          token,
-          "overheated",
-          "Overheated Move",
-          clamp(base - 4, 0, 100),
-          [
-            `Price is up ${change5m.toFixed(
-              1,
-            )}% in 5 minutes.`,
-            `Volume is ${spike.toFixed(
-              2,
-            )}x the recent average pace.`,
-          ],
-          [
-            "Rapid short-window appreciation can reverse sharply.",
-            "This setup is flagged for caution rather than continuation.",
-          ],
-          "caution",
-        ),
-      );
-
-      continue;
-    }
-
-    if (
-      token.activityScore >= 60 &&
-      token.liquidityUsd < 10_000
-    ) {
-      calls.push(
-        buildCall(
-          token,
-          "thin-liquidity",
-          "Thin Liquidity Activity",
-          clamp(base - 10, 0, 100),
-          [
-            `Activity score is ${token.activityScore}.`,
-            `5m volume is $${Math.round(
-              token.volume.m5,
-            ).toLocaleString("en-US")}.`,
-          ],
-          [
-            `Liquidity is only $${Math.round(
-              token.liquidityUsd,
-            ).toLocaleString("en-US")}.`,
-            "Thin liquidity can amplify slippage and abrupt price moves.",
-          ],
-          "caution",
-        ),
-      );
-    }
+    calls.push(
+      buildCall(
+        token,
+        kind,
+        label,
+        score,
+        buyShare,
+        spike,
+        change5m,
+        change1h,
+        [
+          `Quality score is ${score}/100 after hard filtering.`,
+          `Buy share is ${Math.round(
+            buyShare * 100,
+          )}% across ${txns5m} transactions in 5m.`,
+          `5m volume is $${Math.round(
+            token.volume.m5,
+          ).toLocaleString("en-US")} at ${spike.toFixed(
+            2,
+          )}x the recent 1h average 5m pace.`,
+          `Liquidity is $${Math.round(
+            token.liquidityUsd,
+          ).toLocaleString("en-US")} and liquidity/valuation is ${(
+            liqRatio * 100
+          ).toFixed(1)}%.`,
+          `Momentum is +${change5m.toFixed(
+            1,
+          )}% over 5m and ${change1h >= 0 ? "+" : ""}${change1h.toFixed(
+            1,
+          )}% over 1h.`,
+          "The setup must also remain present for two consecutive scans before the UI confirms it.",
+        ],
+      ),
+    );
   }
 
-  return calls.sort((a, b) => {
-    if (a.direction !== b.direction) {
-      return a.direction === "watch" ? -1 : 1;
-    }
-
-    return b.signalScore - a.signalScore;
-  });
+  return calls.sort(
+    (a, b) =>
+      b.signalScore -
+      a.signalScore,
+  );
 }
