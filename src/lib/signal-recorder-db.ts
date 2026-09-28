@@ -710,6 +710,23 @@ export async function recordSignalSnapshot(
     opened += 1;
   }
 
+  // Stage 17 Telegram publisher.
+  // Telegram failures must never break the signal recorder itself.
+  try {
+    const {
+      publishPendingTelegramSignals,
+    } =
+      await import(
+        "@/lib/telegram-publisher"
+      );
+
+    await publishPendingTelegramSignals();
+  } catch (error) {
+    console.error(
+      "Telegram signal publisher failed:",
+      error,
+    );
+  }
   return {
     generatedAt: Date.now(),
     tokenCount: tokens.length,
