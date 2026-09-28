@@ -3,10 +3,8 @@ import {
 } from "next/server";
 
 import {
-  telegramConfig,
-  telegramSendMessage,
-  telegramSiteUrl,
-} from "@/lib/telegram";
+  sendTelegramTestCard,
+} from "@/lib/telegram-photo";
 
 function authorized(
   request: Request,
@@ -38,54 +36,27 @@ export async function POST(
     );
   }
 
-  const { channelId } =
-    telegramConfig();
+  try {
+    const result =
+      await sendTelegramTestCard();
 
-  if (!channelId) {
+    return NextResponse.json({
+      ok: true,
+      delivered: true,
+      result,
+    });
+  } catch (error) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "TELEGRAM_CHANNEL_ID is not configured.",
+          error instanceof Error
+            ? error.message
+            : "Telegram photo test failed.",
       },
       {
-        status: 503,
+        status: 500,
       },
     );
   }
-
-  const site =
-    telegramSiteUrl();
-
-  const message =
-    await telegramSendMessage(
-      channelId,
-      [
-        "✅ <b>MemeScope Telegram Connected</b>",
-        "",
-        "HQ signals can now be published to this channel.",
-        "Signal posts include entry, Potential TP, Current Gain, Maximum Gain, Maximum Drawdown and status updates.",
-        "",
-        "<i>This is a connection test, not a trading signal.</i>",
-      ].join("\n"),
-      {
-        replyMarkup: {
-          inline_keyboard: [
-            [
-              {
-                text:
-                  "🌐 Open MemeScope",
-                url: site,
-              },
-            ],
-          ],
-        },
-      },
-    );
-
-  return NextResponse.json({
-    ok: true,
-    messageId:
-      message.message_id,
-  });
 }
