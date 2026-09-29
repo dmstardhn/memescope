@@ -28,9 +28,9 @@ function authorized(
 
 const DEMOS = [
   [
-    " <b>DEMO " FAST RUNNER</b>",
+    "<b>DEMO - FAST RUNNER</b>",
     "",
-    " <b>CONTENT OPPORTUNITY</b>",
+    "<b>CONTENT OPPORTUNITY</b>",
     "",
     "<b>$FROG</b> reached <b>2.08X</b> from the MemeScope call.",
     "",
@@ -50,7 +50,7 @@ const DEMOS = [
     "-6.8%",
     "",
     "<b>CONTENT PRIORITY</b>",
-    " MEDIUM",
+    "MEDIUM",
     "",
     "<b>Suggested X Hook</b>",
     "",
@@ -61,9 +61,9 @@ const DEMOS = [
   ].join("\n"),
 
   [
-    " <b>DEMO " MAJOR CALL</b>",
+    "<b>DEMO - MAJOR CALL</b>",
     "",
-    "" <b>HIGH PRIORITY CONTENT</b>",
+    "<b>HIGH PRIORITY CONTENT</b>",
     "",
     "<b>$PEPEAI</b> reached <b>5.22X</b> from the original MemeScope call.",
     "",
@@ -93,19 +93,19 @@ const DEMOS = [
     "5.22X from the original call.",
     "",
     "<b>Suggested Content</b>",
-    " Result Story",
-    " Before The Move",
-    " Call Journey",
+    "- Result Story",
+    "- Before The Move",
+    "- Call Journey",
     "",
     "MS-DEMO-002",
   ].join("\n"),
 
   [
-    " <b>DEMO " BEFORE THE MOVE</b>",
+    "<b>DEMO - BEFORE THE MOVE</b>",
     "",
-    "" <b>CONTENT ANGLE</b>",
+    "<b>CONTENT ANGLE</b>",
     "",
-    "<b>What MemeScope saw before $PEPEAI moved from $82K ' $428K</b>",
+    "<b>What MemeScope saw before $PEPEAI moved from $82K to $428K</b>",
     "",
     "Buy Pressure",
     "<b>78%</b>",
@@ -130,23 +130,23 @@ const DEMOS = [
   ].join("\n"),
 
   [
-    " <b>DEMO " EXCEPTIONAL CALL</b>",
+    "<b>DEMO - EXCEPTIONAL CALL</b>",
     "",
-    "'' <b>FEATURED CONTENT</b>",
+    "<b>FEATURED CONTENT</b>",
     "",
     "<b>$DOGEX</b>",
     "",
-    "<b>$74K ' $768K</b>",
+    "<b>$74K to $768K</b>",
     "",
     "Peak Performance",
     "<b>10.38X</b>",
     "",
     "<b>CALL JOURNEY</b>",
     "",
-    "CALL  "  $74K MC",
-    "2X    "  41m",
-    "5X    "  3h 26m",
-    "10X   "  14h 12m",
+    "CALL - $74K MC",
+    "2X - 41m",
+    "5X - 3h 26m",
+    "10X - 14h 12m",
     "",
     "<b>MAX DRAWDOWN</b>",
     "-12.1%",
@@ -158,9 +158,9 @@ const DEMOS = [
   ].join("\n"),
 
   [
-    " <b>DEMO " SPECIAL STORY</b>",
+    "<b>DEMO - SPECIAL STORY</b>",
     "",
-    " <b>SPECIAL CONTENT OPPORTUNITY</b>",
+    "<b>SPECIAL CONTENT OPPORTUNITY</b>",
     "",
     "<b>$MOON</b> became one of MemeScope's strongest recorded calls.",
     "",
@@ -184,9 +184,9 @@ const DEMOS = [
   ].join("\n"),
 
   [
-    " <b>DEMO " DAILY TAPE</b>",
+    "<b>DEMO - DAILY TAPE</b>",
     "",
-    "" <b>MEMESCOPE DAILY TAPE</b>",
+    "<b>MEMESCOPE DAILY TAPE</b>",
     "",
     "29 SEP 2026",
     "",
@@ -200,21 +200,21 @@ const DEMOS = [
     "1",
     "",
     "<b>TOP RECORDED CALL</b>",
-    "$PEPEAI " 5.22X",
+    "$PEPEAI - 5.22X",
     "",
     "<b>FASTEST 2X</b>",
-    "$FROG " 38m",
+    "$FROG - 38m",
     "",
     "<b>CALLS STILL TRACKING</b>",
     "4",
   ].join("\n"),
 
   [
-    " <b>DEMO " WEEKLY INTELLIGENCE</b>",
+    "<b>DEMO - WEEKLY INTELLIGENCE</b>",
     "",
-    "" <b>MEMESCOPE WEEKLY INTELLIGENCE</b>",
+    "<b>MEMESCOPE WEEKLY INTELLIGENCE</b>",
     "",
-    "23 " 29 SEP 2026",
+    "23 - 29 SEP 2026",
     "",
     "<b>TOTAL CALLS</b>",
     "42",
@@ -229,7 +229,7 @@ const DEMOS = [
     "1",
     "",
     "<b>TOP RECORDED CALL</b>",
-    "$DOGEX " 10.38X",
+    "$DOGEX - 10.38X",
     "",
     "<b>MEDIAN PEAK</b>",
     "1.58X",
@@ -273,7 +273,7 @@ export async function POST(
     );
   }
 
-  const results = [];
+  const results: number[] = [];
 
   for (const text of DEMOS) {
     const message =

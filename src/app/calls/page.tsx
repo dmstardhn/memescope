@@ -66,7 +66,7 @@ export default async function CallsPage() {
                 <div>
                   <div className="text-[10px] text-zinc-600">#{index + 1}  {call.publicId}</div>
                   <div className="mt-1 text-lg font-semibold text-white">${call.symbol}</div>
-                  <div className="mt-1 text-xs text-zinc-600">{compactUsd(call.callMarketCapUsd)} -> {compactUsd(call.peakMarketCapUsd)}</div>
+                  <div className="mt-1 text-xs text-zinc-600">{compactUsd(call.callMarketCapUsd)}{" -> "}{compactUsd(call.peakMarketCapUsd)}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-semibold text-emerald-300">{multipleText(call.peakMultiple)}</div>

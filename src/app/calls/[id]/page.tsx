@@ -41,7 +41,7 @@ export default async function CallDetailPage({
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 lg:px-8 lg:py-8">
-      <Link href="/calls" className="text-xs text-zinc-500 hover:text-white"><- Hall of Calls</Link>
+      <Link href="/calls" className="text-xs text-zinc-500 hover:text-white">Back to Hall of Calls</Link>
 
       <div className="mt-5 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
         <div>
