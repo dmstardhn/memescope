@@ -1,6 +1,7 @@
 import "server-only";
 import { getV4Settings, resetV4History, setManualApproval, v4Status } from "./db";
 import { approve, getItem, listPending, nextCaption, nextVisual, reject } from "./queue-control";
+import { publishNow, scheduleIn, xPublishingConfigured } from "./publisher";
 
 type TelegramUpdate = {
   callback_query?: {
@@ -95,6 +96,10 @@ Status: ${String(item.status)}`;
       {text:"Next Chart Style",callback_data:`ch4:visual:${id}`},
     ],
     [
+      {text:"Publish Now",callback_data:`ch4:publish:${id}`},
+      {text:"Schedule +1h",callback_data:`ch4:schedule:${id}`},
+    ],
+    [
       {text:"Back",callback_data:"ch4:queue"},
     ],
   ]};
@@ -177,7 +182,7 @@ export async function tryHandleContentHqAdminRequest(request: Request) {
     return {handled:true};
   }
 
-  const match = callback?.match(/^ch4:(approve|reject|caption|visual):(\d+)$/);
+  const match = callback?.match(/^ch4:(approve|reject|caption|visual|publish|schedule):(\d+)$/);
   if (match) {
     const action = match[1];
     const id = Number(match[2]);
@@ -186,6 +191,22 @@ export async function tryHandleContentHqAdminRequest(request: Request) {
     if (action === "reject") await reject(id);
     if (action === "caption") await nextCaption(id);
     if (action === "visual") await nextVisual(id);
+    if (action === "schedule") {
+      const at = await scheduleIn(id,60);
+      await api("answerCallbackQuery",{callback_query_id:update.callback_query!.id,text:`Scheduled ${new Date(at).toLocaleTimeString("en-GB",{timeZone:"Asia/Jakarta"})}`});
+      await sendQueueItem(chatId,id);
+      return {handled:true};
+    }
+    if (action === "publish") {
+      if (!xPublishingConfigured()) {
+        await api("answerCallbackQuery",{callback_query_id:update.callback_query!.id,text:"X publishing is not configured.",show_alert:true});
+        return {handled:true};
+      }
+      const result = await publishNow(id,true);
+      await api("answerCallbackQuery",{callback_query_id:update.callback_query!.id,text:`Published: ${result.tweetId}`,show_alert:true});
+      await sendQueueItem(chatId,id);
+      return {handled:true};
+    }
 
     await api("answerCallbackQuery",{callback_query_id:update.callback_query!.id,text:`${action} applied`});
     await sendQueueItem(chatId,id);

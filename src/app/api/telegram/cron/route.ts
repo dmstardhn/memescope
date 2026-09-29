@@ -112,7 +112,25 @@ export async function GET(
     };
   }
 
-  return NextResponse.json(
+    try {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") ||
+      process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : "https://memescopes.vercel.app";
+
+    const cronSecret = process.env.CRON_SECRET?.trim();
+    if (cronSecret) {
+      await fetch(`${baseUrl}/api/content-hq-v4/publish`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cronSecret}` },
+        cache: "no-store",
+      }).catch(() => undefined);
+    }
+  } catch {
+    // Content publishing must never break the signal/public Telegram cron.
+  }
+return NextResponse.json(
     {
       ok:
         recorder.ok,
