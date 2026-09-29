@@ -19,6 +19,7 @@ const items = [
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/discover", label: "Discover", icon: Rocket },
   { href: "/signals", label: "Signal Calls", icon: Rocket },
+  { href: "/calls", label: "Calls", icon: Rocket },
   { href: "/analyst", label: "AI Analyst", icon: BrainCircuit },
   { href: "/smart-money", label: "Smart Money", icon: WalletCards },
   { href: "/wallets", label: "Wallets", icon: WalletCards },

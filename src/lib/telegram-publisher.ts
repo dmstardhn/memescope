@@ -11,6 +11,11 @@ import {
   telegramSendMessage,
   telegramSiteUrl,
 } from "@/lib/telegram";
+import {
+  compactUsd,
+  getCallStoryForSignalRecord,
+} from "@/lib/call-story";
+
 
 type DbRow = Record<
   string,
@@ -549,158 +554,87 @@ async function fetchTelegramMarketSnapshot(
 async function channelText(
   record: SignalRecord,
 ) {
-  const market =
-    await fetchTelegramMarketSnapshot(
-      record.tokenAddress,
+  const story =
+    await getCallStoryForSignalRecord(
+      record.id,
     );
 
-  const targetHit =
-    record.status ===
-    "target_hit";
+  const publicId =
+    story?.publicId ||
+    record.signalId;
 
-  const title =
-    targetHit
-      ? "\u2705 MEMESCOPE TARGET HIT"
-      : "\u26A1 MEMESCOPE SIGNAL";
+  const reasons =
+    story?.reasons?.length
+      ? story.reasons.slice(0, 4)
+      : record.planReason
+          .replace(/\s+/g, " ")
+          .trim()
+          .split(/[.;]/)
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .slice(0, 4);
 
-  const status =
-    targetHit
-      ? "\u2705 TARGET HIT"
-      : "\uD83D\uDFE2 ACTIVE";
-
-  const reason =
-    record.planReason
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 700);
-
-  const buyPressure =
-    market.buyPressure ===
-      null
-      ? "N/A"
-      : `${market.buyPressure.toFixed(
-          0,
-        )}%`;
-
-  const volumeSpike =
-    market.volumeSpike ===
-      null
-      ? "N/A"
-      : `${market.volumeSpike.toFixed(
-          2,
-        )}x`;
+  const why = [
+    story?.buyPressurePct === null ||
+    story?.buyPressurePct === undefined
+      ? null
+      : `Buy Pressure: <b>${story.buyPressurePct.toFixed(0)}%</b>`,
+    story?.volumeSpike === null ||
+    story?.volumeSpike === undefined
+      ? null
+      : `Volume Expansion: <b>${story.volumeSpike.toFixed(1)}X</b>`,
+    story?.liquidityUsd === null ||
+    story?.liquidityUsd === undefined
+      ? null
+      : `Liquidity: <b>${compactUsd(story.liquidityUsd)}</b>`,
+    story?.priceChange5m === null ||
+    story?.priceChange5m === undefined
+      ? null
+      : `5m Momentum: <b>${pct(story.priceChange5m)}</b>`,
+  ].filter(
+    (value): value is string =>
+      value !== null,
+  );
 
   return [
-    `<b>${title}</b>`,
+    "ðŸš¨ <b>MEMESCOPE CALL</b>",
     "",
-    "\uD83D\uDFE2 <b>HIGH QUALITY SETUP</b>",
+    `<b>$${escapeTelegramHtml(record.symbol)}</b> â€” ${escapeTelegramHtml(record.name)}`,
+    `<code>${escapeTelegramHtml(publicId)}</code>`,
     "",
-    `<b>$${escapeTelegramHtml(
-      record.symbol,
-    )}</b> | ${escapeTelegramHtml(
-      record.name,
-    )}`,
+    "<b>CALL MC</b>",
+    compactUsd(story?.callMarketCapUsd ?? null),
     "",
-    "\u256D\u2500 <b>MARKET SNAPSHOT</b>",
-    `\u251C \uD83D\uDCB0 Market Cap     <b>${compactMoney(
-      market.marketCapUsd,
-    )}</b>`,
-    `\u251C \uD83D\uDCA7 Liquidity      <b>${compactMoney(
-      market.liquidityUsd,
-    )}</b>`,
-    `\u251C \uD83D\uDCCA Volume 5m      <b>${compactMoney(
-      market.volume5mUsd,
-    )}</b>`,
-    `\u251C \uD83D\uDD25 Volume Spike   <b>${volumeSpike}</b>`,
-    `\u251C \uD83D\uDFE2 Buy Pressure   <b>${buyPressure}</b>`,
-    `\u2570 \u23F1 Age            <b>${ageText(
-      market.ageMinutes,
-    )}</b>`,
+    "<b>ENTRY</b>",
+    money(record.entryPriceUsd),
     "",
-    "\u256D\u2500 <b>SIGNAL</b>",
-    `\u251C \uD83C\uDFAF Quality Score  <b>${Math.round(
-      record.scoreAtEntry,
-    )} / 100</b>`,
-    `\u251C \uD83D\uDCB5 Entry          <b>${money(
-      record.entryPriceUsd,
-    )}</b>`,
-    `\u251C \uD83D\uDCC8 Current        <b>${money(
-      record.currentPriceUsd,
-    )}</b>`,
-    `\u251C \uD83D\uDE80 Potential TP   <b>+${record.targetPercent.toFixed(
-      1,
-    )}%</b>`,
-    `\u251C \uD83D\uDCC8 Current Gain   <b>${pct(
-      record.currentGainPercent,
-    )}</b>`,
-    `\u251C \uD83D\uDD1D Maximum Gain   <b>${pct(
-      record.peakGainPercent,
-    )}</b>`,
-    `\u251C \uD83D\uDCC9 Max Drawdown   <b>${pct(
-      record.maxDrawdownPercent,
-    )}</b>`,
-    `\u251C \u23F3 Hold Time      <b>${holdText(
-      record.openedAt,
-      record.closedAt,
-    )}</b>`,
-    `\u2570 Status         <b>${status}</b>`,
+    "<b>SIGNAL SCORE</b>",
+    `${Math.round(record.scoreAtEntry)} / 100`,
     "",
-    "\uD83D\uDCCC <b>Why MemeScope detected it</b>",
-    reason
-      ? `\u2022 ${escapeTelegramHtml(
-          reason,
-        )}`
-      : "\u2022 Market structure passed the MemeScope HQ filters.",
+    "<b>TRACKING</b>",
+    "â— LIVE",
+    why.length > 0 ? "" : null,
+    why.length > 0 ? "<b>WHY IT TRIGGERED</b>" : null,
+    ...why,
+    reasons.length > 0 ? "" : null,
+    reasons.length > 0
+      ? reasons
+          .map((reason) => `â€¢ ${escapeTelegramHtml(reason)}`)
+          .join("\n")
+      : null,
     "",
-    "\uD83D\uDCCB <b>Contract</b>",
-    `<code>${escapeTelegramHtml(
-      record.tokenAddress,
-    )}</code>`,
+    "<b>CA</b>",
+    `<code>${escapeTelegramHtml(record.tokenAddress)}</code>`,
     "",
-    "\u26A0\uFE0F <i>Potential TP is an analytical estimate based on the confirmed setup, not a guaranteed future return.</i>",
-    "",
-    "<b>MemeScope | MaxScalpLab</b>",
-  ].join("\n");
+    "<i>Original call will remain unchanged. MemeScope continues silent live tracking after publication.</i>",
+  ]
+    .filter(
+      (value): value is string =>
+        value !== null,
+    )
+    .join("\n");
 }
 
-function targetReply(
-  record: SignalRecord,
-) {
-  return [
-    "\uD83C\uDFAF <b>MEMESCOPE TARGET HIT</b>",
-    "",
-    `<b>$${escapeTelegramHtml(
-      record.symbol,
-    )}</b> | ${escapeTelegramHtml(
-      record.name,
-    )}`,
-    "",
-    `Entry            <b>${money(
-      record.entryPriceUsd,
-    )}</b>`,
-    `Potential TP     <b>+${record.targetPercent.toFixed(
-      1,
-    )}%</b>`,
-    `Observed Gain    <b>${pct(
-      record.currentGainPercent,
-    )}</b>`,
-    "",
-    `Maximum Gain     <b>${pct(
-      record.peakGainPercent,
-    )}</b>`,
-    `Max Drawdown     <b>${pct(
-      record.maxDrawdownPercent,
-    )}</b>`,
-    `Hold Time        <b>${holdText(
-      record.openedAt,
-      record.closedAt,
-    )}</b>`,
-    "",
-    "\u2705 Potential target reached.",
-    "",
-    "<b>MemeScope | MaxScalpLab</b>",
-  ].join("\n");
-}
 export async function ensureTelegramPublisherSchema() {
   if (schemaPromise) {
     return schemaPromise;
@@ -883,12 +817,7 @@ export async function publishPendingTelegramSignals() {
     await sql`
       SELECT
         r.*,
-        p.message_id AS telegram_message_id,
-        p.target_notified_at AS telegram_target_notified_at,
-        p.last_status AS telegram_last_status,
-        p.last_current_gain_pct AS telegram_last_current_gain_pct,
-        p.last_peak_gain_pct AS telegram_last_peak_gain_pct,
-        p.last_drawdown_pct AS telegram_last_drawdown_pct
+        p.message_id AS telegram_message_id
       FROM memescope_signal_records r
       LEFT JOIN memescope_telegram_posts p
         ON p.signal_record_id = r.id
@@ -900,8 +829,6 @@ export async function publishPendingTelegramSignals() {
     `;
 
   let sent = 0;
-  const edited = 0;
-  let targetReplies = 0;
 
   for (const raw of rows) {
     const row =
@@ -910,19 +837,11 @@ export async function publishPendingTelegramSignals() {
     const record =
       normalizeRecord(row);
 
-    let messageId =
+    const messageId =
       numOrNull(
         row.telegram_message_id,
       );
 
-    const targetNotified =
-      row.telegram_target_notified_at !==
-        null &&
-      row.telegram_target_notified_at !==
-        undefined;
-
-    // Every new signal record gets its own fresh channel message.
-    // The original signal message is immutable after it is sent.
     if (messageId === null) {
       const message =
         await telegramSendMessage(
@@ -935,9 +854,6 @@ export async function publishPendingTelegramSignals() {
               ),
           },
         );
-
-      messageId =
-        message.message_id;
 
       await sql`
         INSERT INTO memescope_telegram_posts (
@@ -957,7 +873,7 @@ export async function publishPendingTelegramSignals() {
           ${record.id},
           ${record.signalId},
           ${channelId},
-          ${messageId},
+          ${message.message_id},
           FALSE,
           NOW(),
           NULL,
@@ -966,9 +882,7 @@ export async function publishPendingTelegramSignals() {
           ${record.peakGainPercent},
           ${record.maxDrawdownPercent}
         )
-        ON CONFLICT (
-          signal_record_id
-        )
+        ON CONFLICT (signal_record_id)
         DO UPDATE SET
           message_id = COALESCE(
             memescope_telegram_posts.message_id,
@@ -986,57 +900,26 @@ export async function publishPendingTelegramSignals() {
       `;
 
       sent += 1;
-    } else {
-      // Keep tracking data fresh in Neon without editing Telegram.
-      await sql`
-        UPDATE memescope_telegram_posts
-        SET
-          last_status = ${record.status},
-          last_current_gain_pct = ${record.currentGainPercent},
-          last_peak_gain_pct = ${record.peakGainPercent},
-          last_drawdown_pct = ${record.maxDrawdownPercent}
-        WHERE signal_record_id = ${record.id}
-      `;
+      continue;
     }
 
-    // No channel update for negative moves or ordinary price changes.
-    // Only a confirmed target hit creates one new result message.
-    if (
-      record.status ===
-        "target_hit" &&
-      !targetNotified
-    ) {
-      await telegramSendMessage(
-        channelId,
-        targetReply(record),
-        {
-          replyMarkup:
-            signalButtons(
-              record,
-            ),
-        },
-      );
-
-      await sql`
-        UPDATE memescope_telegram_posts
-        SET
-          target_notified_at = NOW(),
-          last_status = ${record.status},
-          last_current_gain_pct = ${record.currentGainPercent},
-          last_peak_gain_pct = ${record.peakGainPercent},
-          last_drawdown_pct = ${record.maxDrawdownPercent}
-        WHERE signal_record_id = ${record.id}
-      `;
-
-      targetReplies += 1;
-    }
+    await sql`
+      UPDATE memescope_telegram_posts
+      SET
+        last_status = ${record.status},
+        last_current_gain_pct = ${record.currentGainPercent},
+        last_peak_gain_pct = ${record.peakGainPercent},
+        last_drawdown_pct = ${record.maxDrawdownPercent}
+      WHERE signal_record_id = ${record.id}
+    `;
   }
 
   return {
     configured: true,
     initialized: false,
     sent,
-    edited,
-    targetReplies,
+    edited: 0,
+    targetReplies: 0,
   };
 }
+

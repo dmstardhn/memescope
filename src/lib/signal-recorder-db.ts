@@ -801,6 +801,26 @@ export async function recordSignalSnapshot(
     opened += 1;
   }
 
+  // Stage 20 Call Story cycle.
+  // Tracks every call independently of the legacy TP lifecycle.
+  try {
+    const {
+      runCallStoryCycle,
+    } = await import(
+      "@/lib/call-story"
+    );
+
+    await runCallStoryCycle(
+      tokens,
+      signals,
+    );
+  } catch (error) {
+    console.error(
+      "MemeScope Call Story cycle failed:",
+      error,
+    );
+  }
+
   // Stage 17 Telegram publisher.
   // Telegram failures must never break the signal recorder itself.
   try {

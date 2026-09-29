@@ -3,6 +3,11 @@ import {
 } from "next/server";
 
 import {
+  bindContentHq,
+  getContentHqStatus,
+  setContentOpportunityStatus,
+} from "@/lib/call-story";
+import {
   applySignalPreset,
   getSignalEngineSettings,
   signalPresetName,
@@ -23,6 +28,8 @@ type TelegramMessage = {
   text?: string;
   chat?: {
     id?: number;
+    type?: string;
+    title?: string;
   };
   from?: {
     id?: number;
@@ -372,6 +379,59 @@ async function handleCallback(
   }
 
   if (
+    data.startsWith(
+      "content:",
+    )
+  ) {
+    const [
+      ,
+      action,
+      rawId,
+    ] = data.split(":");
+
+    const opportunityId =
+      Number(rawId);
+
+    if (
+      !Number.isInteger(
+        opportunityId,
+      ) ||
+      opportunityId <= 0 ||
+      (action !== "used" &&
+        action !== "skip")
+    ) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            "Unknown content action.",
+          showAlert: true,
+        },
+      );
+      return;
+    }
+
+    await setContentOpportunityStatus(
+      opportunityId,
+      action === "used"
+        ? "used"
+        : "skipped",
+    );
+
+    await telegramAnswerCallbackQuery(
+      callbackId,
+      {
+        text:
+          action === "used"
+            ? "Marked as used."
+            : "Content skipped.",
+      },
+    );
+
+    return;
+  }
+
+  if (
     data ===
     "preset:refresh"
   ) {
@@ -517,6 +577,8 @@ function helpText() {
     "<b>MemeScope Owner Bot</b>",
     "",
     "/settings - preset control panel",
+    "/contenthq - Content HQ status",
+    "/bindcontenthq - bind this private group as Content HQ",
     "/signals - active HQ signals",
     "/history - recent signal history",
     "/stats - 30-day signal statistics",
@@ -706,6 +768,79 @@ export async function POST(
 
   try {
     if (
+      command ===
+      "/bindcontenthq"
+    ) {
+      const chatType =
+        message.chat?.type ??
+        "";
+
+      if (
+        chatType !== "group" &&
+        chatType !==
+          "supergroup"
+      ) {
+        await reply(
+          chatId,
+          message.message_id,
+          [
+            "<b>Content HQ binding</b>",
+            "",
+            "Create a private Telegram group, add this bot, then run <code>/bindcontenthq</code> inside that group.",
+          ].join("\n"),
+        );
+      } else {
+        await bindContentHq(
+          chatId,
+        );
+
+        await reply(
+          chatId,
+          message.message_id,
+          [
+            "âœ… <b>MEMESCOPE CONTENT HQ CONNECTED</b>",
+            "",
+            `Group: <b>${escapeTelegramHtml(
+              message.chat?.title ??
+                "Private group",
+            )}</b>`,
+            "",
+            "High-value call stories, content hooks and share-card links will be delivered here for admin review.",
+            "",
+            "<i>No X post is sent automatically.</i>",
+          ].join("\n"),
+        );
+      }
+    } else if (
+      command === "/contenthq"
+    ) {
+      const hq =
+        await getContentHqStatus();
+
+      await reply(
+        chatId,
+        message.message_id,
+        hq.configured
+          ? [
+              "<b>MemeScope Content HQ</b>",
+              "",
+              "Status: <b>CONNECTED</b>",
+              `Chat ID: <code>${escapeTelegramHtml(
+                hq.chatId ??
+                  "unknown",
+              )}</code>`,
+              "",
+              "Content opportunities are generated automatically. X publishing remains manual.",
+            ].join("\n")
+          : [
+              "<b>MemeScope Content HQ</b>",
+              "",
+              "Status: <b>NOT CONNECTED</b>",
+              "",
+              "Create a private group, add this bot, and run <code>/bindcontenthq</code> there.",
+            ].join("\n"),
+      );
+    } else if (
       command === "/start" ||
       command === "/help"
     ) {

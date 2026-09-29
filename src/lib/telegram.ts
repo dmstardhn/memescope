@@ -259,6 +259,16 @@ export async function telegramSetCommands() {
     {
       commands: [
         {
+          command: "contenthq",
+          description:
+            "Content HQ status",
+        },
+        {
+          command: "bindcontenthq",
+          description:
+            "Bind private Content HQ group",
+        },
+        {
           command: "settings",
           description:
             "Choose signal engine preset",
