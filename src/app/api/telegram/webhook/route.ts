@@ -1,4 +1,7 @@
 import {
+  handleContentHqTelegramAction,
+} from "@/lib/content-hq";
+import {
   NextResponse,
 } from "next/server";
 
@@ -375,6 +378,80 @@ async function handleCallback(
         showAlert: true,
       },
     );
+    return;
+  }
+
+  if (
+    data.startsWith(
+      "hq2:",
+    )
+  ) {
+    const [
+      ,
+      action,
+      rawId,
+    ] = data.split(":");
+
+    const contentId =
+      Number(rawId);
+
+    if (
+      !Number.isInteger(
+        contentId,
+      ) ||
+      contentId <= 0 ||
+      ![
+        "approve",
+        "reject",
+        "regenerate",
+        "caption",
+        "publish",
+      ].includes(action)
+    ) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            "Unknown Content HQ action.",
+          showAlert: true,
+        },
+      );
+      return;
+    }
+
+    try {
+      const result =
+        await handleContentHqTelegramAction(
+          action,
+          contentId,
+        );
+
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            result.message.slice(
+              0,
+              180,
+            ),
+        },
+      );
+    } catch (error) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            error instanceof Error
+              ? error.message.slice(
+                  0,
+                  180,
+                )
+              : "Content HQ action failed.",
+          showAlert: true,
+        },
+      );
+    }
+
     return;
   }
 

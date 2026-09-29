@@ -4,7 +4,9 @@ import {
 
 function secretValue() {
   return (
-    process.env.CRON_SECRET?.trim() ??
+    process.env
+      .CRON_SECRET
+      ?.trim() ??
     ""
   );
 }
@@ -24,6 +26,37 @@ function authorized(
   );
 }
 
+async function protectedPost(
+  origin: string,
+  path: string,
+  secret: string,
+) {
+  const response =
+    await fetch(
+      `${origin}${path}`,
+      {
+        method: "POST",
+        headers: {
+          authorization:
+            `Bearer ${secret}`,
+        },
+        cache: "no-store",
+      },
+    );
+
+  const body =
+    (await response.json()) as
+      Record<string, unknown>;
+
+  return {
+    ok:
+      response.ok,
+    status:
+      response.status,
+    body,
+  };
+}
+
 export async function GET(
   request: Request,
 ) {
@@ -31,7 +64,8 @@ export async function GET(
     return NextResponse.json(
       {
         ok: false,
-        error: "Unauthorized.",
+        error:
+          "Unauthorized.",
       },
       {
         status: 401,
@@ -47,33 +81,50 @@ export async function GET(
       request.url,
     ).origin;
 
-  const response =
-    await fetch(
-      `${origin}/api/signals/record`,
-      {
-        method: "POST",
-        headers: {
-          authorization:
-            `Bearer ${secret}`,
-        },
-        cache: "no-store",
-      },
+  const recorder =
+    await protectedPost(
+      origin,
+      "/api/signals/record",
+      secret,
     );
 
-  const body =
-    (await response.json()) as
-      Record<string, unknown>;
+  let contentHq:
+    Record<string, unknown> =
+    {};
+
+  try {
+    const content =
+      await protectedPost(
+        origin,
+        "/api/content-hq/process",
+        secret,
+      );
+
+    contentHq =
+      content.body;
+  } catch (error) {
+    contentHq = {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Content HQ cycle failed.",
+    };
+  }
 
   return NextResponse.json(
     {
-      ok: response.ok,
-      recorder: body,
+      ok:
+        recorder.ok,
+      recorder:
+        recorder.body,
+      contentHq,
     },
     {
       status:
-        response.ok
+        recorder.ok
           ? 200
-          : response.status,
+          : recorder.status,
     },
   );
 }
