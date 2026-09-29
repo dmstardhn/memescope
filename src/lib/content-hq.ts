@@ -1,3 +1,6 @@
+import {
+  renderContentVisual,
+} from "@/lib/content-hq-blueprint-v3";
 import "server-only";
 
 import {
@@ -52,16 +55,19 @@ const DEFAULT_CONFIG:
 
 const PRIORITY:
   Record<ContentType, number> = {
-    moonshot: 9,
-    before_move: 8,
-    big_runner: 7,
-    wallet_activity: 6,
-    runner: 5,
-    holder_growth: 4,
-    memescope_detection: 4,
-    new_discovery: 3,
-    weekly_recap: 3,
-    text_only: 1,
+    moonshot: 90,
+    before_move: 80,
+    big_runner: 70,
+    smart_money: 65,
+    wallet_activity: 60,
+    runner: 50,
+    holder_growth: 40,
+    memescope_detection: 35,
+    new_discovery: 30,
+    call_journey: 28,
+    weekly_recap: 25,
+    hall_of_calls: 25,
+    text_only: 10,
   };
 
 let schemaPromise:
@@ -473,6 +479,46 @@ export async function ensureContentHqSchema() {
           "text_only_02",
           "text_only",
           "not much worth touching right now.\n\npatience > forcing trades.",
+        ],
+        [
+          "smart_money_01",
+          "smart_money",
+          "some notable wallet activity around $TOKEN.\n\nwatching whether the flow keeps building.",
+        ],
+        [
+          "smart_money_02",
+          "smart_money",
+          "$TOKEN is starting to show up in the wallet flow.\n\nstill early. watching the next few transactions.",
+        ],
+        [
+          "call_journey_01",
+          "call_journey",
+          "$TOKEN journey so far.\n\n$FIRST_MC -> $CURRENT_MC\n\n$MULTIPLE since detection.",
+        ],
+        [
+          "call_journey_02",
+          "call_journey",
+          "$TOKEN kept developing after the first detection.\n\nfirst seen: $FIRST_MC\ncurrent: $CURRENT_MC",
+        ],
+        [
+          "hall_of_calls_01",
+          "hall_of_calls",
+          "recent standout: $TOKEN\n\n$FIRST_MC -> $CURRENT_MC\n\n$MULTIPLE.",
+        ],
+        [
+          "hall_of_calls_02",
+          "hall_of_calls",
+          "$TOKEN is one of the stronger tracked moves in the recent tape.\n\n$MULTIPLE since detection.",
+        ],
+        [
+          "holder_growth_02",
+          "holder_growth",
+          "watching the holder side of $TOKEN.\n\nthe distribution is worth keeping an eye on.",
+        ],
+        [
+          "wallet_activity_02",
+          "wallet_activity",
+          "$TOKEN is showing some interesting wallet flow.\n\nwatching whether it continues.",
         ],
       ];
 
@@ -2148,100 +2194,23 @@ async function screenshotForCandidate(
     ContentCandidate,
   source:
     VisualSource,
+  forcedVisualTemplate?:
+    string,
 ) {
-  if (
-    source ===
-    "text_only"
-  ) {
-    return {
-      buffer: null,
-      mime: null,
-    };
-  }
-
-  const url =
-    sourceUrl(
-      source,
+  const visual =
+    await renderContentVisual(
       candidate,
-    );
-
-  if (!url) {
-    return {
-      buffer: null,
-      mime: null,
-    };
-  }
-
-  if (
-    source ===
-    "dex_screener"
-  ) {
-    try {
-      const raw =
-        await captureRawScreenshot(
-          url,
-          source,
-        );
-
-      if (
-        !raw.challengeDetected
-      ) {
-        const annotated =
-          await annotateScreenshot(
-            raw.buffer,
-            candidate,
-          );
-
-        return {
-          buffer:
-            annotated,
-          mime:
-            "image/webp",
-        };
-      }
-    } catch {
-      // Browser capture failed. Use the deterministic fallback below.
-    }
-
-    const fallback =
-      await renderDexFallback(
-        candidate,
-      );
-
-    return {
-      buffer:
-        fallback,
-      mime:
-        "image/webp",
-    };
-  }
-
-  const raw =
-    await captureRawScreenshot(
-      url,
       source,
-    );
-
-  if (
-    raw.challengeDetected
-  ) {
-    return {
-      buffer: null,
-      mime: null,
-    };
-  }
-
-  const annotated =
-    await annotateScreenshot(
-      raw.buffer,
-      candidate,
+      forcedVisualTemplate,
     );
 
   return {
     buffer:
-      annotated,
+      visual.buffer,
     mime:
-      "image/webp",
+      visual.mime,
+    preset:
+      visual.templateId,
   };
 }
 async function createQueueItem(
@@ -2251,6 +2220,8 @@ async function createQueueItem(
     ContentConfig,
   forcedSource?:
     VisualSource,
+  forcedVisualTemplate?:
+    string,
 ) {
   const sql = sqlClient();
 
@@ -2282,11 +2253,6 @@ async function createQueueItem(
       config,
     ));
 
-  const preset =
-    presetFor(
-      candidate.contentType,
-      source,
-    );
 
   const template =
     await chooseCaptionTemplate(
@@ -2303,10 +2269,15 @@ async function createQueueItem(
     await screenshotForCandidate(
       candidate,
       source,
+      forcedVisualTemplate,
     ).catch(
       () => ({
         buffer: null,
         mime: null,
+        preset:
+          source === "text_only"
+            ? "text_only"
+            : `${source}_failed`,
       }),
     );
 
@@ -2353,7 +2324,7 @@ async function createQueueItem(
       ${template.templateKey},
       ${caption},
       ${source},
-      ${preset},
+      ${screenshot.preset},
       ${imageBase64},
       ${screenshot.mime},
       ${candidate.firstMarketCap},
@@ -3267,10 +3238,7 @@ async function regenerateScreenshot(
     UPDATE memescope_content_queue
     SET
       visual_source = ${source},
-      screenshot_preset = ${presetFor(
-        item.contentType,
-        source,
-      )},
+      screenshot_preset = ${screenshot.preset},
       image_base64 = ${screenshot.buffer
         ? screenshot.buffer.toString(
             "base64",
@@ -3746,203 +3714,57 @@ type ContentHqDemoScenario = {
 
 const CONTENT_HQ_DEMO_SCENARIOS:
   ContentHqDemoScenario[] = [
-    {
-      source: "dex_screener",
-      contentType: "new_discovery",
-      multiple: 1.18,
-      label: "DEX New Discovery A",
-    },
-    {
-      source: "dex_screener",
-      contentType: "new_discovery",
-      multiple: 1.31,
-      label: "DEX New Discovery B",
-    },
-    {
-      source: "dex_screener",
-      contentType: "runner",
-      multiple: 2.08,
-      label: "DEX Runner A",
-    },
-    {
-      source: "dex_screener",
-      contentType: "runner",
-      multiple: 2.46,
-      label: "DEX Runner B",
-    },
-    {
-      source: "dex_screener",
-      contentType: "big_runner",
-      multiple: 4.12,
-      label: "DEX Big Runner A",
-    },
-    {
-      source: "dex_screener",
-      contentType: "big_runner",
-      multiple: 4.73,
-      label: "DEX Big Runner B",
-    },
-    {
-      source: "dex_screener",
-      contentType: "moonshot",
-      multiple: 6.18,
-      label: "DEX Moonshot A",
-    },
-    {
-      source: "dex_screener",
-      contentType: "moonshot",
-      multiple: 8.35,
-      label: "DEX Moonshot B",
-    },
-    {
-      source: "dex_screener",
-      contentType: "before_move",
-      multiple: 3.18,
-      label: "DEX Before The Move A",
-    },
-    {
-      source: "dex_screener",
-      contentType: "before_move",
-      multiple: 5.42,
-      label: "DEX Before The Move B",
-    },
+    { source: "dex_screener", contentType: "new_discovery", multiple: 1.14, label: "DEX Discovery 01" },
+    { source: "dex_screener", contentType: "new_discovery", multiple: 1.29, label: "DEX Discovery 02" },
+    { source: "dex_screener", contentType: "runner", multiple: 2.03, label: "DEX Runner 01" },
+    { source: "dex_screener", contentType: "runner", multiple: 2.34, label: "DEX Runner 02" },
+    { source: "dex_screener", contentType: "runner", multiple: 2.78, label: "DEX Runner 03" },
+    { source: "dex_screener", contentType: "big_runner", multiple: 4.06, label: "DEX Big Runner 01" },
+    { source: "dex_screener", contentType: "big_runner", multiple: 4.62, label: "DEX Big Runner 02" },
+    { source: "dex_screener", contentType: "moonshot", multiple: 5.72, label: "DEX Moonshot 01" },
+    { source: "dex_screener", contentType: "moonshot", multiple: 7.31, label: "DEX Moonshot 02" },
+    { source: "dex_screener", contentType: "before_move", multiple: 3.18, label: "DEX Before Move 01" },
+    { source: "dex_screener", contentType: "before_move", multiple: 5.41, label: "DEX Before Move 02" },
+    { source: "dex_screener", contentType: "big_runner", multiple: 3.88, label: "DEX Breakout Research" },
 
-    {
-      source: "gmgn",
-      contentType: "wallet_activity",
-      multiple: 1.22,
-      label: "GMGN Wallet Activity A",
-    },
-    {
-      source: "gmgn",
-      contentType: "wallet_activity",
-      multiple: 1.41,
-      label: "GMGN Wallet Activity B",
-    },
-    {
-      source: "gmgn",
-      contentType: "wallet_activity",
-      multiple: 1.67,
-      label: "GMGN Wallet Activity C",
-    },
-    {
-      source: "gmgn",
-      contentType: "holder_growth",
-      multiple: 1.16,
-      label: "GMGN Holder Growth A",
-    },
-    {
-      source: "gmgn",
-      contentType: "holder_growth",
-      multiple: 1.34,
-      label: "GMGN Holder Growth B",
-    },
-    {
-      source: "gmgn",
-      contentType: "holder_growth",
-      multiple: 1.58,
-      label: "GMGN Holder Growth C",
-    },
-    {
-      source: "gmgn",
-      contentType: "new_discovery",
-      multiple: 1.27,
-      label: "GMGN Discovery",
-    },
-    {
-      source: "gmgn",
-      contentType: "runner",
-      multiple: 2.19,
-      label: "GMGN Runner",
-    },
+    { source: "gmgn", contentType: "wallet_activity", multiple: 1.18, label: "GMGN Wallet 01" },
+    { source: "gmgn", contentType: "wallet_activity", multiple: 1.33, label: "GMGN Wallet 02" },
+    { source: "gmgn", contentType: "wallet_activity", multiple: 1.57, label: "GMGN Wallet 03" },
+    { source: "gmgn", contentType: "smart_money", multiple: 1.26, label: "GMGN Smart Money 01" },
+    { source: "gmgn", contentType: "smart_money", multiple: 1.48, label: "GMGN Smart Money 02" },
+    { source: "gmgn", contentType: "holder_growth", multiple: 1.12, label: "GMGN Holder 01" },
+    { source: "gmgn", contentType: "holder_growth", multiple: 1.31, label: "GMGN Holder 02" },
+    { source: "gmgn", contentType: "holder_growth", multiple: 1.63, label: "GMGN Holder 03" },
+    { source: "gmgn", contentType: "new_discovery", multiple: 1.23, label: "GMGN Activity Flow 01" },
+    { source: "gmgn", contentType: "runner", multiple: 2.11, label: "GMGN Activity Flow 02" },
 
-    {
-      source: "memescope",
-      contentType: "memescope_detection",
-      multiple: 1.24,
-      label: "MemeScope Detection A",
-    },
-    {
-      source: "memescope",
-      contentType: "memescope_detection",
-      multiple: 1.52,
-      label: "MemeScope Detection B",
-    },
-    {
-      source: "memescope",
-      contentType: "memescope_detection",
-      multiple: 1.81,
-      label: "MemeScope Detection C",
-    },
-    {
-      source: "memescope",
-      contentType: "runner",
-      multiple: 2.14,
-      label: "MemeScope Runner A",
-    },
-    {
-      source: "memescope",
-      contentType: "runner",
-      multiple: 2.63,
-      label: "MemeScope Runner B",
-    },
-    {
-      source: "memescope",
-      contentType: "big_runner",
-      multiple: 4.31,
-      label: "MemeScope Big Runner",
-    },
-    {
-      source: "memescope",
-      contentType: "moonshot",
-      multiple: 6.72,
-      label: "MemeScope Moonshot",
-    },
-    {
-      source: "memescope",
-      contentType: "before_move",
-      multiple: 3.64,
-      label: "MemeScope Before The Move",
-    },
-    {
-      source: "memescope",
-      contentType: "weekly_recap",
-      multiple: 1,
-      label: "MemeScope Weekly Recap A",
-    },
-    {
-      source: "memescope",
-      contentType: "weekly_recap",
-      multiple: 1,
-      label: "MemeScope Weekly Recap B",
-    },
+    { source: "memescope", contentType: "memescope_detection", multiple: 1.08, label: "MemeScope Detection 01" },
+    { source: "memescope", contentType: "memescope_detection", multiple: 1.24, label: "MemeScope Detection 02" },
+    { source: "memescope", contentType: "memescope_detection", multiple: 1.51, label: "MemeScope Detection 03" },
+    { source: "memescope", contentType: "runner", multiple: 2.06, label: "MemeScope Runner 01" },
+    { source: "memescope", contentType: "runner", multiple: 2.39, label: "MemeScope Runner 02" },
+    { source: "memescope", contentType: "runner", multiple: 2.81, label: "MemeScope Runner 03" },
+    { source: "memescope", contentType: "big_runner", multiple: 4.14, label: "MemeScope Big Runner 01" },
+    { source: "memescope", contentType: "big_runner", multiple: 4.77, label: "MemeScope Big Runner 02" },
+    { source: "memescope", contentType: "moonshot", multiple: 5.68, label: "MemeScope Moonshot 01" },
+    { source: "memescope", contentType: "moonshot", multiple: 7.44, label: "MemeScope Moonshot 02" },
+    { source: "memescope", contentType: "before_move", multiple: 3.12, label: "MemeScope Before Move 01" },
+    { source: "memescope", contentType: "before_move", multiple: 4.28, label: "MemeScope Before Move 02" },
+    { source: "memescope", contentType: "before_move", multiple: 6.03, label: "MemeScope Before Move 03" },
+    { source: "memescope", contentType: "call_journey", multiple: 5.37, label: "MemeScope Call Journey 01" },
+    { source: "memescope", contentType: "call_journey", multiple: 8.22, label: "MemeScope Call Journey 02" },
+    { source: "memescope", contentType: "weekly_recap", multiple: 1, label: "MemeScope Weekly 01" },
+    { source: "memescope", contentType: "weekly_recap", multiple: 1, label: "MemeScope Weekly 02" },
+    { source: "memescope", contentType: "hall_of_calls", multiple: 5.11, label: "MemeScope Hall 01" },
+    { source: "memescope", contentType: "hall_of_calls", multiple: 10.38, label: "MemeScope Hall 02" },
 
-    {
-      source: "text_only",
-      contentType: "text_only",
-      multiple: 1,
-      label: "Text Only A",
-    },
-    {
-      source: "text_only",
-      contentType: "text_only",
-      multiple: 1,
-      label: "Text Only B",
-    },
-    {
-      source: "text_only",
-      contentType: "text_only",
-      multiple: 1,
-      label: "Text Only C",
-    },
-    {
-      source: "text_only",
-      contentType: "text_only",
-      multiple: 1,
-      label: "Text Only D",
-    },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 01" },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 02" },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 03" },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 04" },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 05" },
+    { source: "text_only", contentType: "text_only", multiple: 1, label: "Text Only 06" },
   ];
-
 export async function contentHqDemoScenarioCount() {
   return CONTENT_HQ_DEMO_SCENARIOS.length;
 }

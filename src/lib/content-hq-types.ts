@@ -5,9 +5,12 @@ export type ContentType =
   | "moonshot"
   | "before_move"
   | "wallet_activity"
+  | "smart_money"
   | "holder_growth"
   | "memescope_detection"
+  | "call_journey"
   | "weekly_recap"
+  | "hall_of_calls"
   | "text_only";
 
 export type VisualSource =
@@ -25,18 +28,7 @@ export type QueueStatus =
   | "failed"
   | "rejected";
 
-export type ScreenshotPreset =
-  | "dex_chart"
-  | "dex_chart_metrics"
-  | "dex_full_token"
-  | "dex_before_after"
-  | "gmgn_overview"
-  | "gmgn_holders"
-  | "gmgn_wallet"
-  | "gmgn_activity"
-  | "memescope_token"
-  | "weekly_recap"
-  | "none";
+export type ScreenshotPreset = string;
 
 export type ContentConfig = {
   runnerGainPct: number;
