@@ -1,0 +1,62 @@
+
+> memecoin-analyst@0.1.0 build
+> next build --webpack
+
+▲ Next.js 16.3.6 (webpack)
+- Environments: .env.local
+✓ Running next.config.ts took 80ms
+
+  Creating an optimized production build ...
+Failed to compile.
+
+./src/app/api/telegram/content-demo/route.ts
+Error:   x Expected ',', got 'ident'
+    ,-[C:\Users\User\Documents\Tools Analyst Memecoin\memecoin-analyst\src\app\api\telegram\content-demo\route.ts:31:1]
+ 28 | 
+ 29 | const DEMOS = [
+ 30 |   [
+ 31 |     " <b>DEMO " FAST RUNNER</b>",
+    :                 ^^^^
+ 32 |     "",
+ 33 |     " <b>CONTENT OPPORTUNITY</b>",
+ 34 |     "",
+    `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/api/telegram/content-demo/route.ts
+
+./src/app/calls/[id]/page.tsx
+Error:   x Expression expected
+    ,-[C:\Users\User\Documents\Tools Analyst Memecoin\memecoin-analyst\src\app\calls\[id]\page.tsx:44:1]
+ 41 | 
+ 42 |   return (
+ 43 |     <main className="mx-auto w-full max-w-6xl px-4 py-6 lg:px-8 lg:py-8">
+ 44 |       <Link href="/calls" className="text-xs text-zinc-500 hover:text-white"><- Hall of Calls</Link>
+    :                                                                               ^
+ 45 | 
+ 46 |       <div className="mt-5 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+ 47 |         <div>
+    `----
+  x Expected ',', got 'of'
+    ,-[C:\Users\User\Documents\Tools Analyst Memecoin\memecoin-analyst\src\app\calls\[id]\page.tsx:44:1]
+ 41 | 
+ 42 |   return (
+ 43 |     <main className="mx-auto w-full max-w-6xl px-4 py-6 lg:px-8 lg:py-8">
+ 44 |       <Link href="/calls" className="text-xs text-zinc-500 hover:text-white"><- Hall of Calls</Link>
+    :                                                                                      ^^
+ 45 | 
+ 46 |       <div className="mt-5 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+ 47 |         <div>
+    `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./src/app/calls/[id]/page.tsx
+
+
+> Build failed because of webpack errors

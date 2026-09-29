@@ -1,3 +1,4 @@
+import { tryHandleContentHqAdminRequest } from "@/lib/content-hq-v4/telegram-admin";
 import {
   handleContentHqTelegramAction,
 } from "@/lib/content-hq";
@@ -672,6 +673,11 @@ function helpText() {
 export async function POST(
   request: Request,
 ) {
+  const contentHqAdmin = await tryHandleContentHqAdminRequest(request.clone());
+  if (contentHqAdmin.handled) {
+    return Response.json({ ok: true });
+  }
+
   const {
     webhookSecret,
     channelUrl,

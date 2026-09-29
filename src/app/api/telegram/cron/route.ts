@@ -96,7 +96,7 @@ export async function GET(
     const content =
       await protectedPost(
         origin,
-        "/api/content-hq/process",
+        "/api/content-hq-v4/process",
         secret,
       );
 
