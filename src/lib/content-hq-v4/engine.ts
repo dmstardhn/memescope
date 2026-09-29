@@ -473,15 +473,29 @@ export async function contentHqV4TestBatch(limit = 6) {
   }
 
   const picked = [...unique.values()].slice(0, Math.max(1, Math.min(limit, 8)));
+  const testStyles = [
+    "pure_chart",
+    "level_setup",
+    "first_spotted",
+    "minimal_metrics",
+    "performance",
+  ];
   const created: Array<Record<string, unknown>> = [];
 
   for (let index = 0; index < picked.length; index++) {
     const selected = picked[index];
 
+    const testStyle =
+      selected.contentType === "chart_setup" ||
+      selected.contentType === "token_update" ||
+      selected.contentType === "token_watch"
+        ? testStyles[index % testStyles.length]
+        : selected.visualStyle;
+
     const visual = await renderContent({
       symbol: selected.symbol,
       contentType: selected.contentType,
-      visualStyle: selected.visualStyle,
+      visualStyle: testStyle,
       firstMarketCap: selected.firstMc,
       currentMarketCap: selected.currentMc,
       multiple: selected.multiple,
@@ -505,7 +519,7 @@ export async function contentHqV4TestBatch(limit = 6) {
       )
       VALUES (
         ${testKey}, ${selected.tokenAddress}, ${selected.pairAddress}, ${selected.symbol},
-        ${selected.contentType}, ${selected.visualStyle}, ${selected.captionTemplate}, ${selected.caption},
+        ${selected.contentType}, ${testStyle}, ${selected.captionTemplate}, ${selected.caption},
         ${`TEST LAB: ${selected.reason}`}, ${selected.firstMc}, ${selected.currentMc}, ${selected.multiple},
         ${visual ? visual.buffer.toString("base64") : null}, ${visual?.mime ?? null},
         ${selected.branded}, 'queued'

@@ -1,3 +1,31 @@
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$root = (Get-Location).Path
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+
+function Full([string]$p) { Join-Path $root $p }
+function WriteUtf8([string]$rel,[string]$text) {
+  $path = Full $rel
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+  [System.IO.File]::WriteAllText($path,$text,$utf8)
+  Write-Host "WRITE $rel" -ForegroundColor Green
+}
+
+$renderPath = Full "src\lib\content-hq-v4\render.ts"
+$enginePath = Full "src\lib\content-hq-v4\engine.ts"
+
+foreach ($p in @($renderPath,$enginePath)) {
+  if (!(Test-Path -LiteralPath $p)) { throw "Missing required V4 file: $p" }
+}
+
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$backup = Join-Path $env:TEMP "MemeScope-V4-Visual-Diversity-$stamp"
+New-Item -ItemType Directory -Force -Path $backup | Out-Null
+Copy-Item -LiteralPath $renderPath -Destination (Join-Path $backup "render.ts") -Force
+Copy-Item -LiteralPath $enginePath -Destination (Join-Path $backup "engine.ts") -Force
+
+$renderer = @'
 import "server-only";
 import sharp from "sharp";
 import type { ContentType } from "./db";
@@ -390,3 +418,110 @@ export async function renderContent(input: RenderInput) {
 
   return { buffer: await asWebp(svg), mime: "image/webp" };
 }
+'@
+
+WriteUtf8 "src/lib/content-hq-v4/render.ts" $renderer
+
+$engine = [System.IO.File]::ReadAllText($enginePath)
+
+$pattern = '(?s)export async function contentHqV4TestBatch\(limit = 6\) \{.*\}\s*$'
+$match = [regex]::Match($engine,$pattern)
+
+if (!$match.Success) {
+  throw "Could not safely find contentHqV4TestBatch() at the end of engine.ts. Nothing was changed in engine.ts."
+}
+
+$replacement = @'
+export async function contentHqV4TestBatch(limit = 6) {
+  await ensureV4Schema();
+  const sql = sqlV4();
+  const candidates = await buildTokenCandidates();
+  const observation = await maybeObservation();
+  if (observation) candidates.push(observation);
+
+  const unique = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.contentType}:${candidate.tokenAddress ?? "text"}`;
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const picked = [...unique.values()].slice(0, Math.max(1, Math.min(limit, 8)));
+  const testStyles = [
+    "pure_chart",
+    "level_setup",
+    "first_spotted",
+    "minimal_metrics",
+    "performance",
+  ];
+  const created: Array<Record<string, unknown>> = [];
+
+  for (let index = 0; index < picked.length; index++) {
+    const selected = picked[index];
+
+    const testStyle =
+      selected.contentType === "chart_setup" ||
+      selected.contentType === "token_update" ||
+      selected.contentType === "token_watch"
+        ? testStyles[index % testStyles.length]
+        : selected.visualStyle;
+
+    const visual = await renderContent({
+      symbol: selected.symbol,
+      contentType: selected.contentType,
+      visualStyle: testStyle,
+      firstMarketCap: selected.firstMc,
+      currentMarketCap: selected.currentMc,
+      multiple: selected.multiple,
+      liquidity: selected.liquidity,
+      volume: selected.volume,
+      candles: selected.candles,
+      historicCandles: selected.historicCandles,
+      branded: selected.branded,
+    });
+
+    if (selected.contentType !== "market_observation" && !visual) continue;
+
+    const testKey = `v4test:${Date.now()}:${index}:${selected.tokenAddress ?? "text"}`;
+
+    const rows = await sql`
+      INSERT INTO memescope_content_v4_queue (
+        event_key, token_address, pair_address, symbol,
+        content_type, visual_style, caption_template, caption,
+        reason, first_market_cap, current_market_cap, multiple,
+        image_base64, image_mime, branded, status
+      )
+      VALUES (
+        ${testKey}, ${selected.tokenAddress}, ${selected.pairAddress}, ${selected.symbol},
+        ${selected.contentType}, ${testStyle}, ${selected.captionTemplate}, ${selected.caption},
+        ${`TEST LAB: ${selected.reason}`}, ${selected.firstMc}, ${selected.currentMc}, ${selected.multiple},
+        ${visual ? visual.buffer.toString("base64") : null}, ${visual?.mime ?? null},
+        ${selected.branded}, 'queued'
+      )
+      RETURNING id, content_type, symbol, visual_style, caption, status
+    `;
+
+    if (rows.length) created.push(rows[0] as Record<string, unknown>);
+  }
+
+  return {
+    ok: true,
+    requested: limit,
+    availableCandidates: candidates.length,
+    created: created.length,
+    items: created,
+  };
+}
+'@
+
+$engine = [regex]::Replace($engine,$pattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement },1)
+[System.IO.File]::WriteAllText($enginePath,$engine,$utf8)
+Write-Host "PATCH engine.ts -> diversified Test Lab styles" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "Visual diversity V2 installed." -ForegroundColor Green
+Write-Host "Backup: $backup" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "This changes Content HQ V4 visuals only." -ForegroundColor Cyan
+Write-Host "Run:" -ForegroundColor Cyan
+Write-Host "  npm run typecheck"
+Write-Host "  npm run build"
