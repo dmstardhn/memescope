@@ -791,9 +791,9 @@ function channelMessageUrl(messageId: number | null) {
 }
 
 function milestoneTitle(milestone: number) {
-  if (milestone === 2) return "🚀 MEMESCOPE RUNNER";
-  if (milestone === 5) return "💎 MEMESCOPE MAJOR CALL";
-  return "👑 MEMESCOPE EXCEPTIONAL CALL";
+  if (milestone === 2) return " MEMESCOPE RUNNER";
+  if (milestone === 5) return " MEMESCOPE MAJOR CALL";
+  return " MEMESCOPE EXCEPTIONAL CALL";
 }
 
 function milestoneAt(call: CallStory, milestone: number) {
@@ -834,15 +834,15 @@ function milestoneButtons(call: CallStory, originalMessageIdValue: number | null
   const site = telegramSiteUrl();
   const originalUrl = channelMessageUrl(originalMessageIdValue);
   const firstRow: Array<{ text: string; url: string }> = [];
-  if (originalUrl) firstRow.push({ text: "📌 Original Call", url: originalUrl });
-  firstRow.push({ text: "🧭 Call Journey", url: `${site}/calls/${encodeURIComponent(call.publicId)}` });
+  if (originalUrl) firstRow.push({ text: " Original Call", url: originalUrl });
+  firstRow.push({ text: " Call Journey", url: `${site}/calls/${encodeURIComponent(call.publicId)}` });
 
   return {
     inline_keyboard: [
       firstRow,
       [
-        { text: "📊 Live Chart", url: `https://dexscreener.com/solana/${encodeURIComponent(call.tokenAddress)}` },
-        { text: "🌐 MemeScope", url: site },
+        { text: " Live Chart", url: `https://dexscreener.com/solana/${encodeURIComponent(call.tokenAddress)}` },
+        { text: " MemeScope", url: site },
       ],
     ],
   };
@@ -1017,9 +1017,9 @@ async function publishPendingContentOpportunities() {
 
     const draft = String(row.draft_text ?? "");
     const text = [
-      "🎬 <b>MEMESCOPE CONTENT OPPORTUNITY</b>",
+      " <b>MEMESCOPE CONTENT OPPORTUNITY</b>",
       "",
-      `<b>$${escapeTelegramHtml(call.symbol)}</b> — ${escapeTelegramHtml(String(row.priority ?? "MEDIUM"))} PRIORITY`,
+      `<b>$${escapeTelegramHtml(call.symbol)}</b> - ${escapeTelegramHtml(String(row.priority ?? "MEDIUM"))} PRIORITY`,
       `<code>${escapeTelegramHtml(call.publicId)}</code>`,
       "",
       `Call MC: <b>${compactUsd(call.callMarketCapUsd)}</b>`,
@@ -1040,15 +1040,15 @@ async function publishPendingContentOpportunities() {
       replyMarkup: {
         inline_keyboard: [
           [
-            { text: "🧭 Open Call", url: `${site}/calls/${encodeURIComponent(call.publicId)}` },
-            { text: "🖼 Journey Card", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=journey` },
+            { text: " Open Call", url: `${site}/calls/${encodeURIComponent(call.publicId)}` },
+            { text: " Journey Card", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=journey` },
           ],
           [
-            { text: "🔎 Before The Move", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=before` },
+            { text: " Before The Move", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=before` },
           ],
           [
-            { text: "✅ Mark Used", callback_data: `content:used:${id}` },
-            { text: "🗑 Skip", callback_data: `content:skip:${id}` },
+            { text: " Mark Used", callback_data: `content:used:${id}` },
+            { text: " Skip", callback_data: `content:skip:${id}` },
           ],
         ],
       },
@@ -1108,7 +1108,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   const { dashboard, top, fastest2x } = await reportStats(type === "daily" ? 1 : 7);
   if (dashboard.totalCalls === 0) return false;
 
-  const title = type === "daily" ? "📊 MEMESCOPE DAILY TAPE" : "📈 MEMESCOPE WEEKLY INTELLIGENCE";
+  const title = type === "daily" ? " MEMESCOPE DAILY TAPE" : " MEMESCOPE WEEKLY INTELLIGENCE";
   const lines = [
     `<b>${title}</b>`,
     reportDate,
@@ -1118,8 +1118,8 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
     `Reached 5X: <b>${dashboard.reached5x}</b>`,
     `Reached 10X: <b>${dashboard.reached10x}</b>`,
     "",
-    top ? `Top Recorded Call: <b>$${escapeTelegramHtml(top.symbol)} — ${multipleText(top.peakMultiple)}</b>` : null,
-    fastest2x ? `Fastest 2X: <b>$${escapeTelegramHtml(fastest2x.symbol)} — ${durationText(fastest2x.calledAt, fastest2x.milestone2xAt)}</b>` : null,
+    top ? `Top Recorded Call: <b>$${escapeTelegramHtml(top.symbol)} - ${multipleText(top.peakMultiple)}</b>` : null,
+    fastest2x ? `Fastest 2X: <b>$${escapeTelegramHtml(fastest2x.symbol)} - ${durationText(fastest2x.calledAt, fastest2x.milestone2xAt)}</b>` : null,
     dashboard.medianPeakMultiple !== null ? `Median Peak: <b>${multipleText(dashboard.medianPeakMultiple)}</b>` : null,
     dashboard.medianMaxDrawdownPct !== null ? `Median Max Drawdown: <b>${pct(dashboard.medianMaxDrawdownPct)}</b>` : null,
     "",
@@ -1129,7 +1129,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   const { channelId } = telegramConfig();
   const publicMessage = await telegramSendMessage(channelId, lines.join("\n"), {
     replyMarkup: {
-      inline_keyboard: [[{ text: "🏆 Hall of Calls", url: `${telegramSiteUrl()}/calls` }]],
+      inline_keyboard: [[{ text: " Hall of Calls", url: `${telegramSiteUrl()}/calls` }]],
     },
   });
 
@@ -1137,7 +1137,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   let hqMessageId: number | null = null;
   if (hq.configured && hq.chatId) {
     const hqText = [
-      `📝 <b>${type === "daily" ? "DAILY TAPE" : "WEEKLY INTELLIGENCE"} CONTENT READY</b>`,
+      ` <b>${type === "daily" ? "DAILY TAPE" : "WEEKLY INTELLIGENCE"} CONTENT READY</b>`,
       "",
       ...lines.slice(1, -2),
       "",
@@ -1148,7 +1148,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
       "<i>Review before publishing outside Telegram.</i>",
     ].filter(Boolean).join("\n");
     const hqMessage = await telegramSendMessage(hq.chatId, hqText, {
-      replyMarkup: { inline_keyboard: [[{ text: "🏆 Open Hall of Calls", url: `${telegramSiteUrl()}/calls` }]] },
+      replyMarkup: { inline_keyboard: [[{ text: " Open Hall of Calls", url: `${telegramSiteUrl()}/calls` }]] },
     });
     hqMessageId = hqMessage.message_id;
   }

@@ -20,7 +20,7 @@ function pct(value: number | null) {
 }
 
 function duration(from: number, to: number | null) {
-  if (to === null) return "—";
+  if (to === null) return "-";
   const minutes = Math.max(0, (to - from) / 60_000);
   if (minutes < 60) return `${Math.round(minutes)}m`;
   const hours = minutes / 60;
@@ -51,7 +51,7 @@ export async function GET(
       <text x="720" y="390" fill="#71717a" font-size="18">SIGNAL SCORE</text>
       <text x="720" y="425" fill="#ffffff" font-size="30" font-weight="600">${Math.round(call.signalScore)}/100</text>
       <text x="72" y="520" fill="#71717a" font-size="20">IT LATER REACHED</text>
-      <text x="72" y="570" fill="${accent}" font-size="48" font-weight="700">${xml(compactUsd(call.peakMarketCapUsd))} MC · ${xml(multipleText(call.peakMultiple))}</text>
+      <text x="72" y="570" fill="${accent}" font-size="48" font-weight="700">${xml(compactUsd(call.peakMarketCapUsd))} MC  ${xml(multipleText(call.peakMultiple))}</text>
     `
     : `
       <text x="72" y="280" fill="#71717a" font-size="20">CALL MC</text>

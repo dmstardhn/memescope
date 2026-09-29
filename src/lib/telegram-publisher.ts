@@ -266,7 +266,7 @@ function signalButtons(
       [
         {
           text:
-            "🛡 Analyze Risk",
+            " Analyze Risk",
           url:
             `${site}/token/` +
             encodeURIComponent(
@@ -275,7 +275,7 @@ function signalButtons(
         },
         {
           text:
-            "📊 DexScreener",
+            " DexScreener",
           url:
             "https://dexscreener.com/solana/" +
             encodeURIComponent(
@@ -286,7 +286,7 @@ function signalButtons(
       [
         {
           text:
-            "🔎 Solscan",
+            " Solscan",
           url:
             "https://solscan.io/token/" +
             encodeURIComponent(
@@ -295,7 +295,7 @@ function signalButtons(
         },
         {
           text:
-            "🌐 MemeScope",
+            " MemeScope",
           url: site,
         },
       ],
@@ -597,9 +597,9 @@ async function channelText(
   );
 
   return [
-    "ðŸš¨ <b>MEMESCOPE CALL</b>",
+    " <b>MEMESCOPE CALL</b>",
     "",
-    `<b>$${escapeTelegramHtml(record.symbol)}</b> â€” ${escapeTelegramHtml(record.name)}`,
+    `<b>$${escapeTelegramHtml(record.symbol)}</b> " ${escapeTelegramHtml(record.name)}`,
     `<code>${escapeTelegramHtml(publicId)}</code>`,
     "",
     "<b>CALL MC</b>",
@@ -612,14 +612,14 @@ async function channelText(
     `${Math.round(record.scoreAtEntry)} / 100`,
     "",
     "<b>TRACKING</b>",
-    "â— LIVE",
+    "- LIVE",
     why.length > 0 ? "" : null,
     why.length > 0 ? "<b>WHY IT TRIGGERED</b>" : null,
     ...why,
     reasons.length > 0 ? "" : null,
     reasons.length > 0
       ? reasons
-          .map((reason) => `â€¢ ${escapeTelegramHtml(reason)}`)
+          .map((reason) => ` ${escapeTelegramHtml(reason)}`)
           .join("\n")
       : null,
     "",

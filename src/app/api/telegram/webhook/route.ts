@@ -798,7 +798,7 @@ export async function POST(
           chatId,
           message.message_id,
           [
-            "âœ… <b>MEMESCOPE CONTENT HQ CONNECTED</b>",
+            "... <b>MEMESCOPE CONTENT HQ CONNECTED</b>",
             "",
             `Group: <b>${escapeTelegramHtml(
               message.chat?.title ??
