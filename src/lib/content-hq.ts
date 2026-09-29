@@ -617,9 +617,11 @@ Promise<ContentConfig & {
       ),
     initializedAt:
       row.initialized_at
-        ? String(
-            row.initialized_at,
-          )
+        ? new Date(
+            String(
+              row.initialized_at,
+            ),
+          ).toISOString()
         : null,
   };
 }
