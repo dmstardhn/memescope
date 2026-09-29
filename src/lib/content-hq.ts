@@ -2873,3 +2873,127 @@ export async function listCaptionTemplates() {
     },
   );
 }
+export async function createContentHqDemo(
+  kind:
+    | "runner"
+    | "big_runner"
+    | "moonshot"
+    | "before_move",
+) {
+  await ensureContentHqSchema();
+
+  const config =
+    await getContentConfig();
+
+  const sql = sqlClient();
+
+  const rows = await sql`
+    SELECT *
+    FROM memescope_call_story
+    WHERE token_address IS NOT NULL
+      AND token_address <> ''
+    ORDER BY called_at DESC
+    LIMIT 1
+  `;
+
+  if (!rows.length) {
+    throw new Error(
+      "No MemeScope call is available for a real screenshot demo.",
+    );
+  }
+
+  const base =
+    await candidateFromCall(
+      rows[0] as DbRow,
+      {
+        ...config,
+        minLiquidityUsd: 0,
+        maxTokenAgeHours:
+          1_000_000,
+      },
+    );
+
+  if (!base) {
+    throw new Error(
+      "Latest MemeScope call could not be converted into a content candidate.",
+    );
+  }
+
+  const multipleByKind = {
+    runner: 2.15,
+    big_runner: 4.25,
+    moonshot: 6.10,
+    before_move: 2.75,
+  } as const;
+
+  const multiple =
+    multipleByKind[kind];
+
+  const currentMarketCap =
+    base.firstMarketCap === null
+      ? base.currentMarketCap
+      : base.firstMarketCap *
+        multiple;
+
+  const candidate:
+    ContentCandidate = {
+    ...base,
+    eventKey:
+      `demo:${Date.now()}:${base.tokenAddress}:${kind}`,
+    contentType: kind,
+    priority:
+      PRIORITY[kind],
+    currentMarketCap,
+    gainPct:
+      (multiple - 1) *
+      100,
+    multiple,
+    milestone:
+      `${multiple.toFixed(
+        2,
+      )}X`,
+    detectedAt:
+      new Date().toISOString(),
+  };
+
+  const item =
+    await createQueueItem(
+      candidate,
+      {
+        ...config,
+        manualApproval: true,
+        minLiquidityUsd: 0,
+        minVolumeUsd: 0,
+        maxTokenAgeHours:
+          1_000_000,
+        tokenPostCooldownMinutes: 0,
+      },
+    );
+
+  if (!item) {
+    throw new Error(
+      "Demo content was not created.",
+    );
+  }
+
+  const previewMessageId =
+    await sendQueuePreview(
+      item,
+    );
+
+  return {
+    itemId:
+      item.id,
+    contentType:
+      item.contentType,
+    symbol:
+      item.symbol,
+    source:
+      item.visualSource,
+    screenshotPreset:
+      item.screenshotPreset,
+    captionTemplate:
+      item.captionTemplate,
+    previewMessageId,
+  };
+}
