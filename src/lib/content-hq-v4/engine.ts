@@ -459,3 +459,68 @@ export async function processContentHqV4() {
     throw error;
   }
 }
+export async function contentHqV4TestBatch(limit = 6) {
+  await ensureV4Schema();
+  const sql = sqlV4();
+  const candidates = await buildTokenCandidates();
+  const observation = await maybeObservation();
+  if (observation) candidates.push(observation);
+
+  const unique = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.contentType}:${candidate.tokenAddress ?? "text"}`;
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const picked = [...unique.values()].slice(0, Math.max(1, Math.min(limit, 8)));
+  const created: Array<Record<string, unknown>> = [];
+
+  for (let index = 0; index < picked.length; index++) {
+    const selected = picked[index];
+
+    const visual = await renderContent({
+      symbol: selected.symbol,
+      contentType: selected.contentType,
+      visualStyle: selected.visualStyle,
+      firstMarketCap: selected.firstMc,
+      currentMarketCap: selected.currentMc,
+      multiple: selected.multiple,
+      liquidity: selected.liquidity,
+      volume: selected.volume,
+      candles: selected.candles,
+      historicCandles: selected.historicCandles,
+      branded: selected.branded,
+    });
+
+    if (selected.contentType !== "market_observation" && !visual) continue;
+
+    const testKey = `v4test:${Date.now()}:${index}:${selected.tokenAddress ?? "text"}`;
+
+    const rows = await sql`
+      INSERT INTO memescope_content_v4_queue (
+        event_key, token_address, pair_address, symbol,
+        content_type, visual_style, caption_template, caption,
+        reason, first_market_cap, current_market_cap, multiple,
+        image_base64, image_mime, branded, status
+      )
+      VALUES (
+        ${testKey}, ${selected.tokenAddress}, ${selected.pairAddress}, ${selected.symbol},
+        ${selected.contentType}, ${selected.visualStyle}, ${selected.captionTemplate}, ${selected.caption},
+        ${`TEST LAB: ${selected.reason}`}, ${selected.firstMc}, ${selected.currentMc}, ${selected.multiple},
+        ${visual ? visual.buffer.toString("base64") : null}, ${visual?.mime ?? null},
+        ${selected.branded}, 'queued'
+      )
+      RETURNING id, content_type, symbol, visual_style, caption, status
+    `;
+
+    if (rows.length) created.push(rows[0] as Record<string, unknown>);
+  }
+
+  return {
+    ok: true,
+    requested: limit,
+    availableCandidates: candidates.length,
+    created: created.length,
+    items: created,
+  };
+}
