@@ -17,6 +17,7 @@ import {
 } from "@/lib/call-story";
 
 
+
 type DbRow = Record<
   string,
   unknown
@@ -266,7 +267,7 @@ function signalButtons(
       [
         {
           text:
-            " Analyze Risk",
+            "🛡 Analyze Risk",
           url:
             `${site}/token/` +
             encodeURIComponent(
@@ -275,7 +276,7 @@ function signalButtons(
         },
         {
           text:
-            " DexScreener",
+            "📊 DexScreener",
           url:
             "https://dexscreener.com/solana/" +
             encodeURIComponent(
@@ -286,7 +287,7 @@ function signalButtons(
       [
         {
           text:
-            " Solscan",
+            "🔎 Solscan",
           url:
             "https://solscan.io/token/" +
             encodeURIComponent(
@@ -295,7 +296,7 @@ function signalButtons(
         },
         {
           text:
-            " MemeScope",
+            "🌐 MemeScope",
           url: site,
         },
       ],
@@ -303,49 +304,7 @@ function signalButtons(
   };
 }
 
-type TelegramMarketSnapshot = {
-  marketCapUsd: number | null;
-  liquidityUsd: number | null;
-  volume5mUsd: number | null;
-  buyPressure: number | null;
-  volumeSpike: number | null;
-  ageMinutes: number | null;
-};
-
-function compactMoney(
-  value: number | null,
-) {
-  if (
-    value === null ||
-    !Number.isFinite(value)
-  ) {
-    return "N/A";
-  }
-
-  if (value >= 1_000_000_000) {
-    return `$${(
-      value / 1_000_000_000
-    ).toFixed(2)}B`;
-  }
-
-  if (value >= 1_000_000) {
-    return `$${(
-      value / 1_000_000
-    ).toFixed(2)}M`;
-  }
-
-  if (value >= 1_000) {
-    return `$${(
-      value / 1_000
-    ).toFixed(1)}K`;
-  }
-
-  return `$${value.toFixed(2)}`;
-}
-
-function ageText(
-  minutes: number | null,
-) {
+function ageText(minutes: number | null) {
   if (
     minutes === null ||
     !Number.isFinite(minutes)
@@ -360,195 +319,37 @@ function ageText(
     )}m`;
   }
 
-  const hours =
-    minutes / 60;
-
-  if (hours < 24) {
-    return `${hours.toFixed(
-      hours >= 10 ? 0 : 1,
-    )}h`;
+  if (minutes < 1_440) {
+    return `${(
+      minutes / 60
+    ).toFixed(1)}h`;
   }
 
   return `${(
-    hours / 24
+    minutes / 1_440
   ).toFixed(1)}d`;
 }
 
-async function fetchTelegramMarketSnapshot(
-  tokenAddress: string,
-): Promise<TelegramMarketSnapshot> {
-  const empty: TelegramMarketSnapshot = {
-    marketCapUsd: null,
-    liquidityUsd: null,
-    volume5mUsd: null,
-    buyPressure: null,
-    volumeSpike: null,
-    ageMinutes: null,
-  };
-
-  try {
-    const response = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(
-        tokenAddress,
-      )}`,
-      {
-        cache: "no-store",
-        signal:
-          AbortSignal.timeout(
-            6_000,
-          ),
-      },
-    );
-
-    if (!response.ok) {
-      return empty;
-    }
-
-    const body =
-      (await response.json()) as {
-        pairs?: Array<{
-          chainId?: string;
-          marketCap?: number;
-          fdv?: number;
-          pairCreatedAt?: number;
-          liquidity?: {
-            usd?: number;
-          };
-          volume?: {
-            m5?: number;
-            h1?: number;
-          };
-          txns?: {
-            m5?: {
-              buys?: number;
-              sells?: number;
-            };
-          };
-        }>;
-      };
-
-    const pairs =
-      (body.pairs ?? [])
-        .filter(
-          (pair) =>
-            pair.chainId ===
-            "solana",
-        )
-        .sort(
-          (a, b) =>
-            Number(
-              b.liquidity?.usd ??
-                0,
-            ) -
-            Number(
-              a.liquidity?.usd ??
-                0,
-            ),
-        );
-
-    const pair =
-      pairs[0];
-
-    if (!pair) {
-      return empty;
-    }
-
-    const buys =
-      Number(
-        pair.txns?.m5?.buys ??
-          0,
-      );
-
-    const sells =
-      Number(
-        pair.txns?.m5?.sells ??
-          0,
-      );
-
-    const totalTxns =
-      buys + sells;
-
-    const volume5m =
-      Number(
-        pair.volume?.m5 ??
-          0,
-      );
-
-    const volume1h =
-      Number(
-        pair.volume?.h1 ??
-          0,
-      );
-
-    const baseline5m =
-      volume1h > 0
-        ? volume1h / 12
-        : 0;
-
-    const createdAt =
-      Number(
-        pair.pairCreatedAt ??
-          0,
-      );
-
-    return {
-      marketCapUsd:
-        Number.isFinite(
-          Number(
-            pair.marketCap ??
-              pair.fdv,
-          ),
-        )
-          ? Number(
-              pair.marketCap ??
-                pair.fdv,
-            )
-          : null,
-
-      liquidityUsd:
-        Number.isFinite(
-          Number(
-            pair.liquidity?.usd,
-          ),
-        )
-          ? Number(
-              pair.liquidity?.usd,
-            )
-          : null,
-
-      volume5mUsd:
-        Number.isFinite(
-          volume5m,
-        )
-          ? volume5m
-          : null,
-
-      buyPressure:
-        totalTxns > 0
-          ? (buys /
-              totalTxns) *
-            100
-          : null,
-
-      volumeSpike:
-        baseline5m > 0
-          ? volume5m /
-            baseline5m
-          : null,
-
-      ageMinutes:
-        createdAt > 0
-          ? Math.max(
-              0,
-              (Date.now() -
-                createdAt) /
-                60_000,
-            )
-          : null,
-    };
-  } catch {
-    return empty;
+function setupLabel(
+  score: number,
+  pairAgeMinutes: number | null,
+) {
+  if (score >= 88) {
+    return "🟢 <b>HIGH QUALITY SETUP</b>";
   }
+
+  if (score >= 80) {
+    return "🔥 <b>HIGH CONVICTION</b>";
+  }
+
+  if (
+    pairAgeMinutes !== null &&
+    pairAgeMinutes <= 180
+  ) {
+    return "⚡ <b>EARLY MOMENTUM</b>";
+  }
+
+  return "🚨 <b>MOMENTUM SETUP</b>";
 }
 
 async function channelText(
@@ -563,76 +364,153 @@ async function channelText(
     story?.publicId ||
     record.signalId;
 
-  const reasons =
-    story?.reasons?.length
-      ? story.reasons.slice(0, 4)
-      : record.planReason
-          .replace(/\s+/g, " ")
-          .trim()
-          .split(/[.;]/)
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .slice(0, 4);
+  const transactions =
+    story?.transactions5m ??
+    null;
+
+  const liquidityRatioPct =
+    story?.liquidityUsd !== null &&
+    story?.liquidityUsd !== undefined &&
+    story?.callMarketCapUsd !== null &&
+    story?.callMarketCapUsd !== undefined &&
+    story.callMarketCapUsd > 0
+      ? (
+          story.liquidityUsd /
+          story.callMarketCapUsd
+        ) * 100
+      : null;
 
   const why = [
     story?.buyPressurePct === null ||
     story?.buyPressurePct === undefined
       ? null
-      : `Buy Pressure: <b>${story.buyPressurePct.toFixed(0)}%</b>`,
+      : transactions === null
+        ? `• Buy pressure reached <b>${story.buyPressurePct.toFixed(
+            0,
+          )}%</b>`
+        : `• Buy pressure reached <b>${story.buyPressurePct.toFixed(
+            0,
+          )}%</b> across <b>${Math.round(
+            transactions,
+          )}</b> transactions`,
     story?.volumeSpike === null ||
     story?.volumeSpike === undefined
       ? null
-      : `Volume Expansion: <b>${story.volumeSpike.toFixed(1)}X</b>`,
+      : `• 5m volume expanded to <b>${story.volumeSpike.toFixed(
+          2,
+        )}x</b> the recent baseline`,
     story?.liquidityUsd === null ||
     story?.liquidityUsd === undefined
       ? null
-      : `Liquidity: <b>${compactUsd(story.liquidityUsd)}</b>`,
+      : `• Liquidity remains at <b>${compactUsd(
+          story.liquidityUsd,
+        )}</b>`,
+    liquidityRatioPct === null
+      ? null
+      : `• Liquidity / valuation stands at <b>${liquidityRatioPct.toFixed(
+          1,
+        )}%</b>`,
     story?.priceChange5m === null ||
     story?.priceChange5m === undefined
       ? null
-      : `5m Momentum: <b>${pct(story.priceChange5m)}</b>`,
+      : `• Short-term momentum is <b>${pct(
+          story.priceChange5m,
+        )}</b> over 5m`,
   ].filter(
     (value): value is string =>
       value !== null,
   );
 
   return [
-    " <b>MEMESCOPE CALL</b>",
+    "⚡ <b>MEMESCOPE SIGNAL</b>",
     "",
-    `<b>$${escapeTelegramHtml(record.symbol)}</b> " ${escapeTelegramHtml(record.name)}`,
-    `<code>${escapeTelegramHtml(publicId)}</code>`,
+    setupLabel(
+      record.scoreAtEntry,
+      story?.pairAgeMinutes ??
+        null,
+    ),
     "",
-    "<b>CALL MC</b>",
-    compactUsd(story?.callMarketCapUsd ?? null),
+    `<b>$${escapeTelegramHtml(
+      record.symbol,
+    )}</b> | ${escapeTelegramHtml(
+      record.name,
+    )}`,
+    `<code>${escapeTelegramHtml(
+      publicId,
+    )}</code>`,
     "",
-    "<b>ENTRY</b>",
-    money(record.entryPriceUsd),
+    "╭─ <b>MARKET SNAPSHOT</b>",
+    `├ 💰 Market Cap <b>${compactUsd(
+      story?.callMarketCapUsd ??
+        null,
+    )}</b>`,
+    `├ 💧 Liquidity <b>${compactUsd(
+      story?.liquidityUsd ??
+        null,
+    )}</b>`,
+    `├ 📊 Volume 5m <b>${compactUsd(
+      story?.volume5mUsd ??
+        null,
+    )}</b>`,
+    `├ 🔥 Volume Expansion <b>${
+      story?.volumeSpike === null ||
+      story?.volumeSpike === undefined
+        ? "N/A"
+        : `${story.volumeSpike.toFixed(
+            2,
+          )}x`
+    }</b>`,
+    `├ 🟢 Buy Pressure <b>${
+      story?.buyPressurePct === null ||
+      story?.buyPressurePct === undefined
+        ? "N/A"
+        : `${story.buyPressurePct.toFixed(
+            0,
+          )}%`
+    }</b>`,
+    `├ 📈 5m Momentum <b>${pct(
+      story?.priceChange5m ??
+        null,
+    )}</b>`,
+    `├ 🔄 Transactions <b>${
+      transactions === null
+        ? "N/A"
+        : Math.round(
+            transactions,
+          ).toLocaleString(
+            "en-US",
+          )
+    }</b>`,
+    `╰ ⏱ Age <b>${ageText(
+      story?.pairAgeMinutes ??
+        null,
+    )}</b>`,
     "",
-    "<b>SIGNAL SCORE</b>",
-    `${Math.round(record.scoreAtEntry)} / 100`,
+    "╭─ <b>SIGNAL</b>",
+    `├ 🎯 Quality Score <b>${Math.round(
+      record.scoreAtEntry,
+    )} / 100</b>`,
+    `├ 💵 Entry <b>${money(
+      record.entryPriceUsd,
+    )}</b>`,
+    "╰ 🟢 Status <b>LIVE</b>",
     "",
-    "<b>TRACKING</b>",
-    "- LIVE",
-    why.length > 0 ? "" : null,
-    why.length > 0 ? "<b>WHY IT TRIGGERED</b>" : null,
-    ...why,
-    reasons.length > 0 ? "" : null,
-    reasons.length > 0
-      ? reasons
-          .map((reason) => ` ${escapeTelegramHtml(reason)}`)
-          .join("\n")
-      : null,
+    "📌 <b>Why MemeScope detected it</b>",
+    ...(why.length > 0
+      ? why
+      : [
+          "• Setup passed the active MemeScope signal filters",
+        ]),
     "",
-    "<b>CA</b>",
-    `<code>${escapeTelegramHtml(record.tokenAddress)}</code>`,
+    "📋 <b>Contract</b>",
+    `<code>${escapeTelegramHtml(
+      record.tokenAddress,
+    )}</code>`,
     "",
-    "<i>Original call will remain unchanged. MemeScope continues silent live tracking after publication.</i>",
-  ]
-    .filter(
-      (value): value is string =>
-        value !== null,
-    )
-    .join("\n");
+    "⚡ <i>MemeScope continues live tracking after publication.</i>",
+    "",
+    "<b>MemeScope</b>",
+  ].join("\n");
 }
 
 export async function ensureTelegramPublisherSchema() {
@@ -922,4 +800,5 @@ export async function publishPendingTelegramSignals() {
     targetReplies: 0,
   };
 }
+
 

@@ -1,3 +1,4 @@
+import { getCallDashboard } from "@/lib/call-story";
 import { tryHandleContentHqAdminRequest } from "@/lib/content-hq-v4/telegram-admin";
 import {
   handleContentHqTelegramAction,
@@ -119,9 +120,9 @@ function presetTitle(
     | "custom",
 ) {
   if (
-    preset === "aggressive"
+    preset === "strict"
   ) {
-    return "AGGRESSIVE";
+    return "SAFE";
   }
 
   if (
@@ -131,18 +132,18 @@ function presetTitle(
   }
 
   if (
-    preset === "strict"
+    preset === "aggressive"
   ) {
-    return "STRICT";
+    return "AGGRESSIVE";
   }
 
   if (
     preset === "ultra"
   ) {
-    return "ULTRA STRICT";
+    return "ULTRA";
   }
 
-  return "CUSTOM (LEGACY)";
+  return "CUSTOM";
 }
 
 function presetText(
@@ -161,34 +162,55 @@ function presetText(
       current,
     )}</b>`,
     "",
-    "<b>Choose how selective the engine should be:</b>",
+    "<b>Signal sensitivity</b>",
     "",
-    "\uD83D\uDD25 <b>AGGRESSIVE</b> - more signals",
-    "Score >= 65 | Liquidity >= $25K | Age &lt;= 48h | Confirm 1 scan",
+    "🛡 <b>SAFE</b> - tightest filtering",
+    "Score >= 88 | Liq >= $100K | Vol 5m >= $12K | Momentum >= +2.5% | Confirm 2",
     "",
-    "\u2696\uFE0F <b>BALANCED</b> - standard HQ mode",
-    "Score >= 80 | Liquidity >= $50K | Age &lt;= 24h | Confirm 1 scan",
+    "⚖️ <b>BALANCED</b> - standard mode",
+    "Score >= 80 | Liq >= $50K | Vol 5m >= $10K | Momentum >= +2.0% | Confirm 1",
     "",
-    "\uD83D\uDEE1\uFE0F <b>STRICT</b> - fewer, tighter signals",
-    "Score >= 88 | Liquidity >= $100K | Age &lt;= 12h | Confirm 1 scan",
+    "🔥 <b>AGGRESSIVE</b> - earlier and more frequent",
+    "Score >= 62 | Liq >= $25K | Vol 5m >= $7K | Momentum >= +1.0% | Confirm 1",
     "",
-    "\uD83D\uDD12 <b>ULTRA STRICT</b> - rarest signals",
-    "Score >= 92 | Liquidity >= $150K | Age &lt;= 6h | Confirm 2 scans",
+    "⚡ <b>ULTRA</b> - most sensitive early-move preset",
+    "Score >= 52 | Liq >= $15K | Vol 5m >= $4K | Momentum >= +0.4% | Confirm 1",
     "",
     "<b>Current values</b>",
     `Score >= ${settings.minSignalScore}`,
     `Liquidity >= ${money(
       settings.minLiquidityUsd,
     )}`,
-    `Max age &lt;= ${settings.maxPairAgeHours}h`,
-    `Confirmation = ${settings.confirmationScans} consecutive scan${
+    `Age = ${settings.minPairAgeMinutes}m - ${settings.maxPairAgeHours}h`,
+    `Volume 5m >= ${money(
+      settings.minVolume5mUsd,
+    )}`,
+    `Transactions 5m >= ${settings.minTransactions5m}`,
+    `Buy pressure = ${(settings.minBuyShare * 100).toFixed(
+      0,
+    )}% - ${(settings.maxBuyShare * 100).toFixed(
+      0,
+    )}%`,
+    `Volume expansion = ${settings.minVolumeSpike.toFixed(
+      2,
+    )}x - ${settings.maxVolumeSpike.toFixed(
+      2,
+    )}x`,
+    `5m momentum = ${settings.minMomentum5m >= 0 ? "+" : ""}${settings.minMomentum5m.toFixed(
+      1,
+    )}% to +${settings.maxMomentum5m.toFixed(
+      1,
+    )}%`,
+    `Liquidity / valuation >= ${(settings.minLiquidityValuationRatio * 100).toFixed(
+      1,
+    )}%`,
+    `Confirmation = ${settings.confirmationScans} scan${
       settings.confirmationScans === 1
         ? ""
         : "s"
     }`,
     "",
-    "<i>Stage 16 HQ volume, transaction, buy-pressure, spike, momentum and liquidity/valuation gates remain active in every preset.</i>",
-    "<i>Preset strictness changes detection frequency; it does not guarantee future performance.</i>",
+    "<i>ULTRA relaxes soft gates but still rejects invalid/stale market structures and limited-confidence data.</i>",
   ].join("\n");
 }
 
@@ -206,7 +228,7 @@ function presetKeyboard(
     text: string,
   ) =>
     current === name
-      ? `\u2705 ${text}`
+      ? `✅ ${text}`
       : text;
 
   return {
@@ -215,17 +237,17 @@ function presetKeyboard(
         {
           text:
             label(
-              "aggressive",
-              "\uD83D\uDD25 Aggressive",
+              "strict",
+              "🛡 Safe",
             ),
           callback_data:
-            "preset:aggressive",
+            "preset:strict",
         },
         {
           text:
             label(
               "balanced",
-              "\u2696\uFE0F Balanced",
+              "⚖️ Balanced",
             ),
           callback_data:
             "preset:balanced",
@@ -235,17 +257,17 @@ function presetKeyboard(
         {
           text:
             label(
-              "strict",
-              "\uD83D\uDEE1\uFE0F Strict",
+              "aggressive",
+              "🔥 Aggressive",
             ),
           callback_data:
-            "preset:strict",
+            "preset:aggressive",
         },
         {
           text:
             label(
               "ultra",
-              "\uD83D\uDD12 Ultra Strict",
+              "⚡ Ultra",
             ),
           callback_data:
             "preset:ultra",
@@ -254,7 +276,7 @@ function presetKeyboard(
       [
         {
           text:
-            "\uD83D\uDD04 Refresh",
+            "🔄 Refresh",
           callback_data:
             "preset:refresh",
         },
@@ -1090,43 +1112,65 @@ export async function POST(
     } else if (
       command === "/stats"
     ) {
-      const body =
-        await fetchJson(
-          origin,
-          "/api/signals/analytics?days=30",
+      const dashboard =
+        await getCallDashboard(
+          30,
         );
 
-      const analytics =
-        (body.analytics ??
-          {}) as Record<
-          string,
-          unknown
-        >;
+      const best =
+        dashboard.topCalls[0] ??
+        null;
+
+      const performanceText = (
+        value:
+          | number
+          | null,
+      ) => {
+        if (
+          value === null ||
+          !Number.isFinite(
+            value,
+          )
+        ) {
+          return "N/A";
+        }
+
+        if (value >= 2) {
+          return `${value.toFixed(
+            value >= 10
+              ? 1
+              : 2,
+          )}X`;
+        }
+
+        return `+${Math.max(
+          0,
+          (value - 1) * 100,
+        ).toFixed(0)}%`;
+      };
 
       const text = [
-        "<b>MemeScope - 30D Stats</b>",
+        "<b>MemeScope Calls — 30D</b>",
         "",
-        `Signals: <b>${Number(
-          analytics.total ?? 0,
-        )}</b>`,
-        `Active: <b>${Number(
-          analytics.active ?? 0,
-        )}</b>`,
-        `TP Hit: <b>${Number(
-          analytics.targetHits ??
-            0,
-        )}</b>`,
-        `Avg Current Gain: <b>${pct(
-          analytics.averageCurrentGain,
-        )}</b>`,
-        `Avg Max Gain: <b>${pct(
-          analytics.averagePeakGain,
-        )}</b>`,
-        `Avg Max Drawdown: <b>${pct(
-          analytics.averageDrawdown,
+        `Calls: <b>${dashboard.totalCalls}</b>`,
+        `Running: <b>${dashboard.runningCalls}</b>`,
+        `2X+: <b>${dashboard.reached2x}</b>`,
+        `5X+: <b>${dashboard.reached5x}</b>`,
+        `10X+: <b>${dashboard.reached10x}</b>`,
+        `Best Runner: <b>${
+          best
+            ? `${escapeTelegramHtml(
+                best.symbol,
+              )} ${performanceText(
+                best.peakMultiple,
+              )}`
+            : "N/A"
+        }</b>`,
+        `Median Peak: <b>${performanceText(
+          dashboard.medianPeakMultiple,
         )}</b>`,
         "",
-        "<i>Historical descriptive statistics are not future probabilities.</i>",
+        "<i>Based on timestamped MemeScope calls and actual post-call peaks.</i>",
       ].join("\n");
 
       await reply(

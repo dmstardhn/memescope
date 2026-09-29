@@ -6,33 +6,72 @@ import type {
 } from "@/lib/signal-types";
 import type { TerminalToken } from "@/lib/terminal-types";
 
-export const DEFAULT_SIGNAL_SETTINGS: SignalSettings = {
+export const DEFAULT_SIGNAL_SETTINGS: Required<SignalSettings> = {
   minSignalScore: 80,
   minLiquidityUsd: 50_000,
+  minPairAgeMinutes: 10,
   maxPairAgeHours: 24,
+  minVolume5mUsd: 10_000,
+  minTransactions5m: 40,
+  minBuyShare: 0.60,
+  maxBuyShare: 0.88,
+  minVolumeSpike: 1.30,
+  maxVolumeSpike: 3.50,
+  minMomentum5m: 2,
+  maxMomentum5m: 15,
+  minMomentum1h: -5,
+  maxMomentum1h: 120,
+  minLiquidityValuationRatio: 0.08,
 };
+
+function finiteOr(
+  value: unknown,
+  fallback: number,
+) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
+}
 
 export function normalizeSignalSettings(
   input?: Partial<SignalSettings>,
-): SignalSettings {
+): Required<SignalSettings> {
   const minSignalScore = Math.max(
-    60,
+    40,
     Math.min(
       95,
       Math.round(
-        Number(input?.minSignalScore) ||
+        finiteOr(
+          input?.minSignalScore,
           DEFAULT_SIGNAL_SETTINGS.minSignalScore,
+        ),
       ),
     ),
   );
 
   const minLiquidityUsd = Math.max(
-    10_000,
+    5_000,
     Math.min(
       1_000_000,
       Math.round(
-        Number(input?.minLiquidityUsd) ||
+        finiteOr(
+          input?.minLiquidityUsd,
           DEFAULT_SIGNAL_SETTINGS.minLiquidityUsd,
+        ),
+      ),
+    ),
+  );
+
+  const minPairAgeMinutes = Math.max(
+    1,
+    Math.min(
+      180,
+      Math.round(
+        finiteOr(
+          input?.minPairAgeMinutes,
+          DEFAULT_SIGNAL_SETTINGS.minPairAgeMinutes,
+        ),
       ),
     ),
   );
@@ -42,8 +81,135 @@ export function normalizeSignalSettings(
     Math.min(
       168,
       Math.round(
-        Number(input?.maxPairAgeHours) ||
+        finiteOr(
+          input?.maxPairAgeHours,
           DEFAULT_SIGNAL_SETTINGS.maxPairAgeHours,
+        ),
+      ),
+    ),
+  );
+
+  const minVolume5mUsd = Math.max(
+    1_000,
+    Math.min(
+      1_000_000,
+      Math.round(
+        finiteOr(
+          input?.minVolume5mUsd,
+          DEFAULT_SIGNAL_SETTINGS.minVolume5mUsd,
+        ),
+      ),
+    ),
+  );
+
+  const minTransactions5m = Math.max(
+    5,
+    Math.min(
+      5_000,
+      Math.round(
+        finiteOr(
+          input?.minTransactions5m,
+          DEFAULT_SIGNAL_SETTINGS.minTransactions5m,
+        ),
+      ),
+    ),
+  );
+
+  const minBuyShare = Math.max(
+    0.50,
+    Math.min(
+      0.90,
+      finiteOr(
+        input?.minBuyShare,
+        DEFAULT_SIGNAL_SETTINGS.minBuyShare,
+      ),
+    ),
+  );
+
+  const maxBuyShare = Math.max(
+    minBuyShare + 0.01,
+    Math.min(
+      0.99,
+      finiteOr(
+        input?.maxBuyShare,
+        DEFAULT_SIGNAL_SETTINGS.maxBuyShare,
+      ),
+    ),
+  );
+
+  const minVolumeSpike = Math.max(
+    0.80,
+    Math.min(
+      5,
+      finiteOr(
+        input?.minVolumeSpike,
+        DEFAULT_SIGNAL_SETTINGS.minVolumeSpike,
+      ),
+    ),
+  );
+
+  const maxVolumeSpike = Math.max(
+    minVolumeSpike + 0.05,
+    Math.min(
+      10,
+      finiteOr(
+        input?.maxVolumeSpike,
+        DEFAULT_SIGNAL_SETTINGS.maxVolumeSpike,
+      ),
+    ),
+  );
+
+  const minMomentum5m = Math.max(
+    -10,
+    Math.min(
+      50,
+      finiteOr(
+        input?.minMomentum5m,
+        DEFAULT_SIGNAL_SETTINGS.minMomentum5m,
+      ),
+    ),
+  );
+
+  const maxMomentum5m = Math.max(
+    minMomentum5m + 0.1,
+    Math.min(
+      200,
+      finiteOr(
+        input?.maxMomentum5m,
+        DEFAULT_SIGNAL_SETTINGS.maxMomentum5m,
+      ),
+    ),
+  );
+
+  const minMomentum1h = Math.max(
+    -100,
+    Math.min(
+      200,
+      finiteOr(
+        input?.minMomentum1h,
+        DEFAULT_SIGNAL_SETTINGS.minMomentum1h,
+      ),
+    ),
+  );
+
+  const maxMomentum1h = Math.max(
+    minMomentum1h + 0.1,
+    Math.min(
+      1_000,
+      finiteOr(
+        input?.maxMomentum1h,
+        DEFAULT_SIGNAL_SETTINGS.maxMomentum1h,
+      ),
+    ),
+  );
+
+  const minLiquidityValuationRatio = Math.max(
+    0.01,
+    Math.min(
+      0.50,
+      finiteOr(
+        input?.minLiquidityValuationRatio,
+        DEFAULT_SIGNAL_SETTINGS.minLiquidityValuationRatio,
       ),
     ),
   );
@@ -51,7 +217,19 @@ export function normalizeSignalSettings(
   return {
     minSignalScore,
     minLiquidityUsd,
+    minPairAgeMinutes,
     maxPairAgeHours,
+    minVolume5mUsd,
+    minTransactions5m,
+    minBuyShare,
+    maxBuyShare,
+    minVolumeSpike,
+    maxVolumeSpike,
+    minMomentum5m,
+    maxMomentum5m,
+    minMomentum1h,
+    maxMomentum1h,
+    minLiquidityValuationRatio,
   };
 }
 
@@ -253,7 +431,7 @@ function buildCall(
   spike: number,
   change5m: number,
   change1h: number,
-  settings: SignalSettings,
+  settings: Required<SignalSettings>,
   reasons: string[],
 ): SignalCall {
   const target =
@@ -349,25 +527,25 @@ export function generateSignals(
       marketCap === null ||
       marketCap <= 0 ||
       ageMinutes === null ||
-      ageMinutes < 10 ||
+      ageMinutes < settings.minPairAgeMinutes ||
       ageMinutes > settings.maxPairAgeHours * 60 ||
       token.liquidityUsd < settings.minLiquidityUsd ||
-      token.volume.m5 < 10_000 ||
-      txns5m < 40 ||
+      token.volume.m5 < settings.minVolume5mUsd ||
+      txns5m < settings.minTransactions5m ||
       buyShare === null ||
-      buyShare < 0.60 ||
-      buyShare > 0.88 ||
+      buyShare < settings.minBuyShare ||
+      buyShare > settings.maxBuyShare ||
       spike === null ||
-      spike < 1.3 ||
-      spike > 3.5 ||
+      spike < settings.minVolumeSpike ||
+      spike > settings.maxVolumeSpike ||
       change5m === null ||
-      change5m < 2 ||
-      change5m > 15 ||
+      change5m < settings.minMomentum5m ||
+      change5m > settings.maxMomentum5m ||
       change1h === null ||
-      change1h < -5 ||
-      change1h > 120 ||
+      change1h < settings.minMomentum1h ||
+      change1h > settings.maxMomentum1h ||
       liqRatio === null ||
-      liqRatio < 0.08 ||
+      liqRatio < settings.minLiquidityValuationRatio ||
       confidenceFor(token) === "limited"
     ) {
       continue;
@@ -430,7 +608,7 @@ export function generateSignals(
           )}% over 5m and ${change1h >= 0 ? "+" : ""}${change1h.toFixed(
             1,
           )}% over 1h.`,
-          "The setup must also remain present for two consecutive scans before the UI confirms it.",
+          "Confirmation cadence is controlled by the active MemeScope preset.",
         ],
       ),
     );

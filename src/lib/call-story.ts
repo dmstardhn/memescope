@@ -55,11 +55,15 @@ export type CallStory = {
   buyPressurePct: number | null;
   volumeSpike: number | null;
   liquidityUsd: number | null;
+  volume5mUsd: number | null;
+  transactions5m: number | null;
   priceChange5m: number | null;
   pairAgeMinutes: number | null;
   reasons: string[];
   baseline: boolean;
   lastPublicMilestone: number;
+  lastPublicStage: number;
+  lastPublicPostAt: number | null;
   milestone2xAt: number | null;
   milestone5xAt: number | null;
   milestone10xAt: number | null;
@@ -71,6 +75,7 @@ export type CallStory = {
 export type CallDashboard = {
   days: number;
   totalCalls: number;
+  runningCalls: number;
   reached2x: number;
   reached5x: number;
   reached10x: number;
@@ -149,11 +154,15 @@ function normalizeCall(row: DbRow): CallStory {
     buyPressurePct: numOrNull(row.buy_pressure_pct),
     volumeSpike: numOrNull(row.volume_spike),
     liquidityUsd: numOrNull(row.liquidity_usd),
+    volume5mUsd: numOrNull(row.volume_5m_usd),
+    transactions5m: numOrNull(row.transactions_5m),
     priceChange5m: numOrNull(row.price_change_5m),
     pairAgeMinutes: numOrNull(row.pair_age_minutes),
     reasons: safeJsonArray(row.reasons_json),
     baseline: row.baseline === true,
     lastPublicMilestone: num(row.last_public_milestone),
+    lastPublicStage: num(row.last_public_stage),
+    lastPublicPostAt: nullableMillis(row.last_public_post_at),
     milestone2xAt: nullableMillis(row.milestone_2x_at),
     milestone5xAt: nullableMillis(row.milestone_5x_at),
     milestone10xAt: nullableMillis(row.milestone_10x_at),
@@ -227,6 +236,36 @@ function highestPublicMilestone(value: number | null) {
   return 0;
 }
 
+const PUBLIC_PERFORMANCE_STAGES = [
+  { stage: 1, multiple: 1.25 },
+  { stage: 2, multiple: 1.50 },
+  { stage: 3, multiple: 2 },
+  { stage: 4, multiple: 3 },
+  { stage: 5, multiple: 5 },
+  { stage: 6, multiple: 10 },
+  { stage: 7, multiple: 20 },
+  { stage: 8, multiple: 50 },
+  { stage: 9, multiple: 100 },
+] as const;
+
+function highestPublicStage(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return 0;
+
+  let result = 0;
+  for (const item of PUBLIC_PERFORMANCE_STAGES) {
+    if (value >= item.multiple) {
+      result = item.stage;
+    }
+  }
+  return result;
+}
+
+function stageMultiple(stage: number) {
+  return PUBLIC_PERFORMANCE_STAGES.find(
+    (item) => item.stage === stage,
+  )?.multiple ?? 0;
+}
+
 function milestoneColumn(milestone: number) {
   if (milestone === 2) return "milestone_2x_at";
   if (milestone === 5) return "milestone_5x_at";
@@ -281,11 +320,15 @@ export async function ensureCallStorySchema() {
         buy_pressure_pct DOUBLE PRECISION,
         volume_spike DOUBLE PRECISION,
         liquidity_usd DOUBLE PRECISION,
+        volume_5m_usd DOUBLE PRECISION,
+        transactions_5m INTEGER,
         price_change_5m DOUBLE PRECISION,
         pair_age_minutes DOUBLE PRECISION,
         reasons_json TEXT NOT NULL DEFAULT '[]',
         baseline BOOLEAN NOT NULL DEFAULT FALSE,
         last_public_milestone INTEGER NOT NULL DEFAULT 0,
+        last_public_stage INTEGER NOT NULL DEFAULT 0,
+        last_public_post_at TIMESTAMPTZ,
         milestone_2x_at TIMESTAMPTZ,
         milestone_5x_at TIMESTAMPTZ,
         milestone_10x_at TIMESTAMPTZ,
@@ -298,6 +341,68 @@ export async function ensureCallStorySchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `;
+
+    await sql`
+      ALTER TABLE memescope_call_story
+      ADD COLUMN IF NOT EXISTS volume_5m_usd DOUBLE PRECISION
+    `;
+
+    await sql`
+      ALTER TABLE memescope_call_story
+      ADD COLUMN IF NOT EXISTS transactions_5m INTEGER
+    `;
+
+    await sql`
+      ALTER TABLE memescope_call_story
+      ADD COLUMN IF NOT EXISTS last_public_stage INTEGER NOT NULL DEFAULT 0
+    `;
+
+    await sql`
+      ALTER TABLE memescope_call_story
+      ADD COLUMN IF NOT EXISTS last_public_post_at TIMESTAMPTZ
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS memescope_call_update_state (
+        id INTEGER PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await sql`
+      INSERT INTO memescope_call_update_state (id, version)
+      VALUES (1, 0)
+      ON CONFLICT (id) DO NOTHING
+    `;
+
+    await sql`
+      UPDATE memescope_call_story
+      SET last_public_stage =
+        CASE
+          WHEN COALESCE(peak_multiple, 1) >= 100 THEN 9
+          WHEN COALESCE(peak_multiple, 1) >= 50 THEN 8
+          WHEN COALESCE(peak_multiple, 1) >= 20 THEN 7
+          WHEN COALESCE(peak_multiple, 1) >= 10 THEN 6
+          WHEN COALESCE(peak_multiple, 1) >= 5 THEN 5
+          WHEN COALESCE(peak_multiple, 1) >= 3 THEN 4
+          WHEN COALESCE(peak_multiple, 1) >= 2 THEN 3
+          WHEN COALESCE(peak_multiple, 1) >= 1.5 THEN 2
+          WHEN COALESCE(peak_multiple, 1) >= 1.25 THEN 1
+          ELSE 0
+        END
+      WHERE (
+        SELECT version
+        FROM memescope_call_update_state
+        WHERE id = 1
+      ) < 2
+    `;
+
+    await sql`
+      UPDATE memescope_call_update_state
+      SET version = 2, updated_at = NOW()
+      WHERE id = 1 AND version < 2
     `;
 
     await sql`
@@ -549,6 +654,7 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
 
     const baseline = record.openedAt <= state.initializedAt;
     const initialPublicMilestone = baseline ? highestPublicMilestone(peakMultiple) : 0;
+    const initialPublicStage = baseline ? highestPublicStage(peakMultiple) : 0;
     const reasons = signal?.reasons ?? existing?.reasons ?? [];
     const buyPressurePct = signal?.buyShare5m !== null && signal?.buyShare5m !== undefined
       ? signal.buyShare5m * 100
@@ -576,11 +682,14 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
           buy_pressure_pct,
           volume_spike,
           liquidity_usd,
+          volume_5m_usd,
+          transactions_5m,
           price_change_5m,
           pair_age_minutes,
           reasons_json,
           baseline,
           last_public_milestone,
+          last_public_stage,
           updated_at
         ) VALUES (
           ${record.id},
@@ -602,11 +711,20 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
           ${buyPressurePct},
           ${signal?.volumeSpike5m ?? null},
           ${signal?.liquidityUsd ?? token?.liquidityUsd ?? market?.liquidityUsd ?? null},
+          ${signal?.volume5m ?? token?.volume.m5 ?? null},
+          ${
+            signal
+              ? signal.buys5m + signal.sells5m
+              : token
+                ? token.txns.m5.buys + token.txns.m5.sells
+                : null
+          },
           ${signal?.priceChange5m ?? token?.priceChange.m5 ?? null},
           ${signal?.pairAgeMinutes ?? token?.pairAgeMinutes ?? null},
           ${JSON.stringify(reasons)},
           ${baseline},
           ${initialPublicMilestone},
+          ${initialPublicStage},
           NOW()
         )
         ON CONFLICT (signal_record_id) DO NOTHING
@@ -615,56 +733,40 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
       await sql`
         UPDATE memescope_call_story
         SET
-          current_price_usd = COALESCE(${currentPrice}::double precision, current_price_usd),
-          current_market_cap_usd = COALESCE(${currentMarketCap}::double precision, current_market_cap_usd),
-          call_market_cap_usd = COALESCE(call_market_cap_usd, ${callMarketCap}::double precision),
-          peak_price_usd = GREATEST(
-            COALESCE(peak_price_usd, 0::double precision),
-            COALESCE(${peakPrice}::double precision, 0::double precision)
+          current_price_usd = COALESCE(${currentPrice}, current_price_usd),
+          current_market_cap_usd = COALESCE(${currentMarketCap}, current_market_cap_usd),
+          call_market_cap_usd = COALESCE(call_market_cap_usd, ${callMarketCap}),
+          peak_price_usd = GREATEST(COALESCE(peak_price_usd, 0), COALESCE(${peakPrice}, 0)),
+          peak_market_cap_usd = GREATEST(COALESCE(peak_market_cap_usd, 0), COALESCE(${peakMarketCap}, 0)),
+          current_multiple = COALESCE(${currentMultiple}, current_multiple),
+          peak_multiple = GREATEST(COALESCE(peak_multiple, 1), COALESCE(${peakMultiple}, 1)),
+          max_drawdown_pct = LEAST(COALESCE(max_drawdown_pct, 0), COALESCE(${maxDrawdown}, 0)),
+          signal_score = GREATEST(signal_score, ${signal?.signalScore ?? record.scoreAtEntry}),
+          buy_pressure_pct = COALESCE(buy_pressure_pct, ${buyPressurePct}),
+          volume_spike = COALESCE(volume_spike, ${signal?.volumeSpike5m ?? existing.volumeSpike ?? null}),
+          liquidity_usd = COALESCE(${signal?.liquidityUsd ?? token?.liquidityUsd ?? market?.liquidityUsd ?? null}, liquidity_usd),
+          volume_5m_usd = COALESCE(
+            ${signal?.volume5m ?? token?.volume.m5 ?? null},
+            volume_5m_usd
           ),
-          peak_market_cap_usd = GREATEST(
-            COALESCE(peak_market_cap_usd, 0::double precision),
-            COALESCE(${peakMarketCap}::double precision, 0::double precision)
+          transactions_5m = COALESCE(
+            ${
+              signal
+                ? signal.buys5m + signal.sells5m
+                : token
+                  ? token.txns.m5.buys + token.txns.m5.sells
+                  : null
+            },
+            transactions_5m
           ),
-          current_multiple = COALESCE(${currentMultiple}::double precision, current_multiple),
-          peak_multiple = GREATEST(
-            COALESCE(peak_multiple, 1::double precision),
-            COALESCE(${peakMultiple}::double precision, 1::double precision)
-          ),
-          max_drawdown_pct = LEAST(
-            COALESCE(max_drawdown_pct, 0::double precision),
-            COALESCE(${maxDrawdown}::double precision, 0::double precision)
-          ),
-          signal_score = GREATEST(
-            signal_score,
-            ${signal?.signalScore ?? record.scoreAtEntry}::integer
-          ),
-          buy_pressure_pct = COALESCE(
-            buy_pressure_pct,
-            ${buyPressurePct}::double precision
-          ),
-          volume_spike = COALESCE(
-            volume_spike,
-            ${signal?.volumeSpike5m ?? existing.volumeSpike ?? null}::double precision
-          ),
-          liquidity_usd = COALESCE(
-            ${signal?.liquidityUsd ?? token?.liquidityUsd ?? market?.liquidityUsd ?? null}::double precision,
-            liquidity_usd
-          ),
-          price_change_5m = COALESCE(
-            price_change_5m,
-            ${signal?.priceChange5m ?? token?.priceChange.m5 ?? null}::double precision
-          ),
-          pair_age_minutes = COALESCE(
-            pair_age_minutes,
-            ${signal?.pairAgeMinutes ?? token?.pairAgeMinutes ?? null}::double precision
-          ),
+          price_change_5m = COALESCE(price_change_5m, ${signal?.priceChange5m ?? token?.priceChange.m5 ?? null}),
+          pair_age_minutes = COALESCE(pair_age_minutes, ${signal?.pairAgeMinutes ?? token?.pairAgeMinutes ?? null}),
           reasons_json = CASE
-            WHEN reasons_json = '[]' THEN ${JSON.stringify(reasons)}::text
+            WHEN reasons_json = '[]' THEN ${JSON.stringify(reasons)}
             ELSE reasons_json
           END,
           updated_at = NOW()
-        WHERE signal_record_id = ${record.id}::text
+        WHERE signal_record_id = ${record.id}
       `;
     }
 
@@ -718,6 +820,13 @@ export async function getCallDashboard(days = 30): Promise<CallDashboard> {
   return {
     days: safeDays,
     totalCalls: calls.length,
+    runningCalls: calls.filter((call: CallStory) => {
+      const ageMs = Date.now() - call.calledAt;
+      return (
+        ageMs <= 48 * 60 * 60 * 1000 &&
+        (call.currentMultiple ?? 0) >= 1.05
+      );
+    }).length,
     reached2x: calls.filter((call: CallStory) => (call.peakMultiple ?? 0) >= 2).length,
     reached5x: calls.filter((call: CallStory) => (call.peakMultiple ?? 0) >= 5).length,
     reached10x: calls.filter((call: CallStory) => (call.peakMultiple ?? 0) >= 10).length,
@@ -790,109 +899,258 @@ function channelMessageUrl(messageId: number | null) {
   return `${channelUrl.replace(/\/+$/, "")}/${messageId}`;
 }
 
-function milestoneTitle(milestone: number) {
-  if (milestone === 2) return " MEMESCOPE RUNNER";
-  if (milestone === 5) return " MEMESCOPE MAJOR CALL";
-  return " MEMESCOPE EXCEPTIONAL CALL";
-}
+function performanceLabel(call: CallStory) {
+  const peak =
+    call.peakMultiple ??
+    call.currentMultiple ??
+    1;
 
-function milestoneAt(call: CallStory, milestone: number) {
-  if (milestone === 2) return call.milestone2xAt;
-  if (milestone === 5) return call.milestone5xAt;
-  return call.milestone10xAt;
-}
-
-function milestoneTelegramText(call: CallStory, milestone: number) {
-  const peakMc = call.peakMarketCapUsd ?? call.currentMarketCapUsd;
-  const lines = [
-    `<b>${milestoneTitle(milestone)}</b>`,
-    "",
-    `<b>$${escapeTelegramHtml(call.symbol)}</b>`,
-    `<code>${escapeTelegramHtml(call.publicId)}</code>`,
-    "",
-    `From Call: <b>${multipleText(call.peakMultiple)}</b>`,
-    `Call MC: <b>${compactUsd(call.callMarketCapUsd)}</b>`,
-    `${milestone === 2 ? "Current" : "Peak"} MC: <b>${compactUsd(peakMc)}</b>`,
-    `Time to ${milestone}X: <b>${durationText(call.calledAt, milestoneAt(call, milestone))}</b>`,
-    `Max Drawdown: <b>${pct(call.maxDrawdownPct)}</b>`,
-  ];
-
-  if (milestone >= 10) {
-    lines.push(
-      "",
-      `2X: <b>${durationText(call.calledAt, call.milestone2xAt)}</b>`,
-      `5X: <b>${durationText(call.calledAt, call.milestone5xAt)}</b>`,
-      `10X: <b>${durationText(call.calledAt, call.milestone10xAt)}</b>`,
-    );
+  if (peak >= 2) {
+    return `${multipleText(peak)} FROM CALL`;
   }
 
-  lines.push("", "<i>Original call remains unchanged.</i>");
-  return lines.join("\n");
+  const gain =
+    Math.max(
+      0,
+      (peak - 1) * 100,
+    );
+
+  return `+${gain.toFixed(
+    gain >= 100 ? 0 : 1,
+  )}%`;
 }
 
-function milestoneButtons(call: CallStory, originalMessageIdValue: number | null) {
+function performanceTitle(stage: number) {
+  if (stage >= 6) {
+    return "👑 MEMESCOPE RUNNER";
+  }
+
+  if (stage >= 3) {
+    return "🔥 MEMESCOPE RUNNER";
+  }
+
+  return "⚡ MEMESCOPE UPDATE";
+}
+
+function performanceStatus(stage: number) {
+  if (stage >= 3) return "RUNNING";
+  if (stage >= 2) return "MOMENTUM";
+  return "MOVING";
+}
+
+function milestoneButtons(
+  call: CallStory,
+  originalMessageIdValue: number | null,
+) {
   const site = telegramSiteUrl();
   const originalUrl = channelMessageUrl(originalMessageIdValue);
   const firstRow: Array<{ text: string; url: string }> = [];
-  if (originalUrl) firstRow.push({ text: " Original Call", url: originalUrl });
-  firstRow.push({ text: " Call Journey", url: `${site}/calls/${encodeURIComponent(call.publicId)}` });
+
+  if (originalUrl) {
+    firstRow.push({
+      text: "📌 Original Call",
+      url: originalUrl,
+    });
+  }
+
+  firstRow.push({
+    text: "🧭 Call Journey",
+    url:
+      `${site}/calls/${encodeURIComponent(
+        call.publicId,
+      )}`,
+  });
 
   return {
     inline_keyboard: [
       firstRow,
       [
-        { text: " Live Chart", url: `https://dexscreener.com/solana/${encodeURIComponent(call.tokenAddress)}` },
-        { text: " MemeScope", url: site },
+        {
+          text: "📊 Live Chart",
+          url:
+            `https://dexscreener.com/solana/${encodeURIComponent(
+              call.tokenAddress,
+            )}`,
+        },
+        {
+          text: "🌐 MemeScope",
+          url: site,
+        },
       ],
     ],
   };
 }
 
+function performanceTelegramText(
+  call: CallStory,
+  stage: number,
+) {
+  const peakMc =
+    call.peakMarketCapUsd ??
+    call.currentMarketCapUsd;
+
+  return [
+    `<b>${performanceTitle(
+      stage,
+    )}</b>`,
+    "",
+    `<b>$${escapeTelegramHtml(
+      call.symbol,
+    )} • ${performanceLabel(
+      call,
+    )}</b>`,
+    `<code>${escapeTelegramHtml(
+      call.publicId,
+    )}</code>`,
+    "",
+    "╭─ <b>CALL PERFORMANCE</b>",
+    `├ 💰 Entry MC <b>${compactUsd(
+      call.callMarketCapUsd,
+    )}</b>`,
+    `├ 🚀 Peak MC <b>${compactUsd(
+      peakMc,
+    )}</b>`,
+    `├ 📈 From Call <b>${performanceLabel(
+      call,
+    )}</b>`,
+    `╰ 🟢 Status <b>${performanceStatus(
+      stage,
+    )}</b>`,
+    "",
+    stage >= 3
+      ? "🔥 New post-call high detected."
+      : "⚡ Momentum is developing after the original call.",
+    "",
+    "<b>MemeScope</b>",
+  ].join("\n");
+}
+
 async function publishPendingPublicMilestones() {
-  if (!telegramConfigured()) return { sent: 0 };
+  if (!telegramConfigured()) {
+    return { sent: 0 };
+  }
+
   const sql = sqlClient();
-  const { channelId } = telegramConfig();
+  const { channelId } =
+    telegramConfig();
+
   const rows = await sql`
     SELECT *
     FROM memescope_call_story
     WHERE baseline = FALSE
-      AND peak_multiple >= 2
-      AND (
-        (peak_multiple >= 10 AND last_public_milestone < 10) OR
-        (peak_multiple >= 5 AND last_public_milestone < 5) OR
-        (peak_multiple >= 2 AND last_public_milestone < 2)
-      )
+      AND peak_multiple >= 1.25
+      AND last_public_stage < 9
     ORDER BY called_at ASC
-    LIMIT 30
+    LIMIT 40
   `;
 
   let sent = 0;
-  for (const raw of rows) {
-    const call = normalizeCall(raw as DbRow);
-    const milestone = highestPublicMilestone(call.peakMultiple);
-    if (milestone <= call.lastPublicMilestone || milestone === 0) continue;
 
-    const originalMessageIdValue = await originalTelegramMessageId(call.signalRecordId);
-    if (originalMessageIdValue === null) {
-      // Keep chronological order: NEW CALL must exist before any milestone post.
+  for (const raw of rows) {
+    const call =
+      normalizeCall(
+        raw as DbRow,
+      );
+
+    const stage =
+      highestPublicStage(
+        call.peakMultiple,
+      );
+
+    if (
+      stage <=
+        call.lastPublicStage ||
+      stage === 0
+    ) {
       continue;
     }
 
-    const message = await telegramSendMessage(
-      channelId,
-      milestoneTelegramText(call, milestone),
-      { replyMarkup: milestoneButtons(call, originalMessageIdValue) },
-    );
+    const threshold =
+      stageMultiple(stage);
 
-    if (milestone === 2) {
-      await sql`UPDATE memescope_call_story SET last_public_milestone = 2, telegram_2x_message_id = ${message.message_id}, updated_at = NOW() WHERE signal_record_id = ${call.signalRecordId}`;
-    } else if (milestone === 5) {
-      await sql`UPDATE memescope_call_story SET last_public_milestone = 5, telegram_5x_message_id = ${message.message_id}, updated_at = NOW() WHERE signal_record_id = ${call.signalRecordId}`;
-    } else {
-      await sql`UPDATE memescope_call_story SET last_public_milestone = 10, telegram_10x_message_id = ${message.message_id}, updated_at = NOW() WHERE signal_record_id = ${call.signalRecordId}`;
+    // Small movement updates get a short cooldown so a fast move
+    // does not produce +25% and +50% posts back-to-back.
+    if (
+      stage <= 2 &&
+      call.lastPublicPostAt !== null &&
+      Date.now() -
+        call.lastPublicPostAt <
+        5 * 60_000
+    ) {
+      continue;
     }
+
+    const originalMessageIdValue =
+      await originalTelegramMessageId(
+        call.signalRecordId,
+      );
+
+    if (
+      originalMessageIdValue ===
+      null
+    ) {
+      // NEW CALL must exist before an update can be published.
+      continue;
+    }
+
+    const message =
+      await telegramSendMessage(
+        channelId,
+        performanceTelegramText(
+          call,
+          stage,
+        ),
+        {
+          replyMarkup:
+            milestoneButtons(
+              call,
+              originalMessageIdValue,
+            ),
+        },
+      );
+
+    const legacyMilestone =
+      threshold >= 10
+        ? 10
+        : threshold >= 5
+          ? 5
+          : threshold >= 2
+            ? 2
+            : call.lastPublicMilestone;
+
+    await sql`
+      UPDATE memescope_call_story
+      SET
+        last_public_stage = ${stage},
+        last_public_milestone = ${legacyMilestone},
+        last_public_post_at = NOW(),
+        updated_at = NOW()
+      WHERE signal_record_id = ${call.signalRecordId}
+    `;
+
+    if (stage === 3) {
+      await sql`
+        UPDATE memescope_call_story
+        SET telegram_2x_message_id = ${message.message_id}
+        WHERE signal_record_id = ${call.signalRecordId}
+      `;
+    } else if (stage === 5) {
+      await sql`
+        UPDATE memescope_call_story
+        SET telegram_5x_message_id = ${message.message_id}
+        WHERE signal_record_id = ${call.signalRecordId}
+      `;
+    } else if (stage === 6) {
+      await sql`
+        UPDATE memescope_call_story
+        SET telegram_10x_message_id = ${message.message_id}
+        WHERE signal_record_id = ${call.signalRecordId}
+      `;
+    }
+
     sent += 1;
   }
+
   return { sent };
 }
 
@@ -1017,9 +1275,9 @@ async function publishPendingContentOpportunities() {
 
     const draft = String(row.draft_text ?? "");
     const text = [
-      " <b>MEMESCOPE CONTENT OPPORTUNITY</b>",
+      "🎬 <b>MEMESCOPE CONTENT OPPORTUNITY</b>",
       "",
-      `<b>$${escapeTelegramHtml(call.symbol)}</b> - ${escapeTelegramHtml(String(row.priority ?? "MEDIUM"))} PRIORITY`,
+      `<b>$${escapeTelegramHtml(call.symbol)}</b> — ${escapeTelegramHtml(String(row.priority ?? "MEDIUM"))} PRIORITY`,
       `<code>${escapeTelegramHtml(call.publicId)}</code>`,
       "",
       `Call MC: <b>${compactUsd(call.callMarketCapUsd)}</b>`,
@@ -1040,15 +1298,15 @@ async function publishPendingContentOpportunities() {
       replyMarkup: {
         inline_keyboard: [
           [
-            { text: " Open Call", url: `${site}/calls/${encodeURIComponent(call.publicId)}` },
-            { text: " Journey Card", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=journey` },
+            { text: "🧭 Open Call", url: `${site}/calls/${encodeURIComponent(call.publicId)}` },
+            { text: "🖼 Journey Card", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=journey` },
           ],
           [
-            { text: " Before The Move", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=before` },
+            { text: "🔎 Before The Move", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=before` },
           ],
           [
-            { text: " Mark Used", callback_data: `content:used:${id}` },
-            { text: " Skip", callback_data: `content:skip:${id}` },
+            { text: "✅ Mark Used", callback_data: `content:used:${id}` },
+            { text: "🗑 Skip", callback_data: `content:skip:${id}` },
           ],
         ],
       },
@@ -1108,7 +1366,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   const { dashboard, top, fastest2x } = await reportStats(type === "daily" ? 1 : 7);
   if (dashboard.totalCalls === 0) return false;
 
-  const title = type === "daily" ? " MEMESCOPE DAILY TAPE" : " MEMESCOPE WEEKLY INTELLIGENCE";
+  const title = type === "daily" ? "📊 MEMESCOPE DAILY TAPE" : "📈 MEMESCOPE WEEKLY INTELLIGENCE";
   const lines = [
     `<b>${title}</b>`,
     reportDate,
@@ -1118,8 +1376,8 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
     `Reached 5X: <b>${dashboard.reached5x}</b>`,
     `Reached 10X: <b>${dashboard.reached10x}</b>`,
     "",
-    top ? `Top Recorded Call: <b>$${escapeTelegramHtml(top.symbol)} - ${multipleText(top.peakMultiple)}</b>` : null,
-    fastest2x ? `Fastest 2X: <b>$${escapeTelegramHtml(fastest2x.symbol)} - ${durationText(fastest2x.calledAt, fastest2x.milestone2xAt)}</b>` : null,
+    top ? `Top Recorded Call: <b>$${escapeTelegramHtml(top.symbol)} — ${multipleText(top.peakMultiple)}</b>` : null,
+    fastest2x ? `Fastest 2X: <b>$${escapeTelegramHtml(fastest2x.symbol)} — ${durationText(fastest2x.calledAt, fastest2x.milestone2xAt)}</b>` : null,
     dashboard.medianPeakMultiple !== null ? `Median Peak: <b>${multipleText(dashboard.medianPeakMultiple)}</b>` : null,
     dashboard.medianMaxDrawdownPct !== null ? `Median Max Drawdown: <b>${pct(dashboard.medianMaxDrawdownPct)}</b>` : null,
     "",
@@ -1129,7 +1387,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   const { channelId } = telegramConfig();
   const publicMessage = await telegramSendMessage(channelId, lines.join("\n"), {
     replyMarkup: {
-      inline_keyboard: [[{ text: " Hall of Calls", url: `${telegramSiteUrl()}/calls` }]],
+      inline_keyboard: [[{ text: "🏆 Hall of Calls", url: `${telegramSiteUrl()}/calls` }]],
     },
   });
 
@@ -1137,7 +1395,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
   let hqMessageId: number | null = null;
   if (hq.configured && hq.chatId) {
     const hqText = [
-      ` <b>${type === "daily" ? "DAILY TAPE" : "WEEKLY INTELLIGENCE"} CONTENT READY</b>`,
+      `📝 <b>${type === "daily" ? "DAILY TAPE" : "WEEKLY INTELLIGENCE"} CONTENT READY</b>`,
       "",
       ...lines.slice(1, -2),
       "",
@@ -1148,7 +1406,7 @@ async function sendReport(type: "daily" | "weekly", reportDate: string) {
       "<i>Review before publishing outside Telegram.</i>",
     ].filter(Boolean).join("\n");
     const hqMessage = await telegramSendMessage(hq.chatId, hqText, {
-      replyMarkup: { inline_keyboard: [[{ text: " Open Hall of Calls", url: `${telegramSiteUrl()}/calls` }]] },
+      replyMarkup: { inline_keyboard: [[{ text: "🏆 Open Hall of Calls", url: `${telegramSiteUrl()}/calls` }]] },
     });
     hqMessageId = hqMessage.message_id;
   }
