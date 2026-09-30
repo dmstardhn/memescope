@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { neon } from "@neondatabase/serverless";
 
 function authorized(request: Request) {
@@ -25,7 +25,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const sql = neon(databaseUrl);
+  try {
+    const sql = neon(databaseUrl);
 
   const state = await sql`
     SELECT
@@ -67,11 +68,23 @@ export async function GET(request: Request) {
     LIMIT 10
   `;
 
-  return NextResponse.json({
-    ok: true,
-    state: state[0] ?? null,
-    events: events[0] ?? null,
-    posts: posts[0] ?? null,
-    latest,
-  });
+    return NextResponse.json({
+      ok: true,
+      state: state[0] ?? null,
+      events: events[0] ?? null,
+      posts: posts[0] ?? null,
+      latest,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown debug error.",
+      },
+      { status: 500 },
+    );
+  }
 }
