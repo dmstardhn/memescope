@@ -552,14 +552,14 @@ function freeButtons(dexUrl: string | null) {
 
   if (dexUrl) {
     firstRow.push({
-      text: "ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  DexScreener",
+      text: "Ã°Å¸â€œÅ  DexScreener",
       url: dexUrl,
     });
   }
 
   if (config.vipJoinUrl) {
     firstRow.push({
-      text: "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ VIP",
+      text: "Ã°Å¸â€â€™ VIP",
       url: config.vipJoinUrl,
     });
   }
@@ -572,7 +572,7 @@ function freeButtons(dexUrl: string | null) {
 
   rows.push([
     {
-      text: "ÃƒÂ°Ã…Â¸Ã…â€™Ã‚Â MemeScope",
+      text: "Ã°Å¸Å’Â MemeScope",
       url: telegramSiteUrl(),
     },
   ]);
@@ -591,24 +591,24 @@ function paidAlertText(
   );
 
   return [
-    "ÃƒÂ¢Ã…Â¡Ã‚Â¡ <b>MEMESCOPE DEX WATCH</b>",
+    "Ã¢Å¡Â¡ <b>MEMESCOPE DEX WATCH</b>",
     "",
-    "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â  <b>PAID ACTIVITY DETECTED</b>",
+    "Ã°Å¸Å¸Â  <b>PAID ACTIVITY DETECTED</b>",
     "",
     `<b>$${escapeTelegramHtml(market.symbol)}</b> | ${escapeTelegramHtml(market.name)}`,
     "",
-    "ÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â­ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ <b>MARKET SNAPSHOT</b>",
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â° Market Cap <b>${compactUsd(market.marketCapUsd)}</b>`,
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â§ Liquidity <b>${compactUsd(market.liquidityUsd)}</b>`,
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  Volume 24h <b>${compactUsd(market.volume24hUsd)}</b>`,
-    `ÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â° ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â¾ DEX Activity <b>${escapeTelegramHtml(labels.join(" + "))}</b>`,
+    "Ã¢â€¢Â­Ã¢â€â‚¬ <b>MARKET SNAPSHOT</b>",
+    `Ã¢â€Å“ Ã°Å¸â€™Â° Market Cap <b>${compactUsd(market.marketCapUsd)}</b>`,
+    `Ã¢â€Å“ Ã°Å¸â€™Â§ Liquidity <b>${compactUsd(market.liquidityUsd)}</b>`,
+    `Ã¢â€Å“ Ã°Å¸â€œÅ  Volume 24h <b>${compactUsd(market.volume24hUsd)}</b>`,
+    `Ã¢â€¢Â° Ã°Å¸Â§Â¾ DEX Activity <b>${escapeTelegramHtml(labels.join(" + "))}</b>`,
     "",
-    "ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¹ <b>Contract</b>",
+    "Ã°Å¸â€œâ€¹ <b>Contract</b>",
     `<code>${escapeTelegramHtml(market.tokenAddress)}</code>`,
     "",
-    "ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â <i>Paid DEX activity detected. This is market activity, not a MemeScope VIP signal.</i>",
+    "Ã¢Å¡Â Ã¯Â¸Â <i>Paid DEX activity detected. This is market activity, not a MemeScope VIP signal.</i>",
     "",
-    "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ <b>VIP sees the calls before selected results.</b>",
+    "Ã°Å¸â€â€™ <b>VIP sees the calls before selected results.</b>",
     "",
     "<b>MemeScope</b>",
   ].join("\n");
@@ -625,26 +625,26 @@ function highestFreeResultMilestone(value: number) {
 }
 
 function vipResultTitle(milestone: number) {
-  if (milestone >= 20) return "ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã…Â½ MEMESCOPE VIP RUNNER";
-  if (milestone >= 10) return "ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬Â  MEMESCOPE VIP RUNNER";
-  return "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ MEMESCOPE VIP RESULT";
+  if (milestone >= 20) return "Ã°Å¸â€™Å½ MEMESCOPE VIP RUNNER";
+  if (milestone >= 10) return "Ã°Å¸Ââ€  MEMESCOPE VIP RUNNER";
+  return "Ã°Å¸â€Â¥ MEMESCOPE VIP RESULT";
 }
 
 function vipResultText(call: VipResultRow) {
   return [
     `<b>${vipResultTitle(highestFreeResultMilestone(call.peakMultiple))}</b>`,
     "",
-    `<b>$${escapeTelegramHtml(call.symbol)} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ ${multipleText(call.peakMultiple)} FROM VIP CALL</b>`,
+    `<b>$${escapeTelegramHtml(call.symbol)} Ã¢â‚¬Â¢ ${multipleText(call.peakMultiple)} FROM VIP CALL</b>`,
     "",
-    "ÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â­ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ <b>TRACKED PERFORMANCE</b>",
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ VIP Call MC <b>${compactUsd(call.callMarketCapUsd)}</b>`,
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Peak MC <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
-    `ÃƒÂ¢Ã¢â‚¬ÂÃ…â€œ ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‹â€  Peak Multiple <b>${multipleText(call.peakMultiple)}</b>`,
-    "ÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â° ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Tracked from the original VIP call",
+    "Ã¢â€¢Â­Ã¢â€â‚¬ <b>TRACKED PERFORMANCE</b>",
+    `Ã¢â€Å“ Ã°Å¸Å½Â¯ VIP Call MC <b>${compactUsd(call.callMarketCapUsd)}</b>`,
+    `Ã¢â€Å“ Ã°Å¸Å¡â‚¬ Peak MC <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
+    `Ã¢â€Å“ Ã°Å¸â€œË† Peak Multiple <b>${multipleText(call.peakMultiple)}</b>`,
+    "Ã¢â€¢Â° Ã¢Å“â€¦ Tracked from the original VIP call",
     "",
     "This result comes from a timestamped MemeScope VIP call. The original live entry is not being republished here.",
     "",
-    "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ <b>VIP sees the call. Public sees selected results.</b>",
+    "Ã°Å¸â€â€™ <b>VIP sees the call. Public sees selected results.</b>",
     "",
     "<b>MemeScope</b>",
   ].join("\n");
@@ -853,7 +853,7 @@ async function baselineVipResults() {
 
   for (const call of calls) {
     const milestone = highestFreeResultMilestone(call.peakMultiple);
-    if (milestone === 0) continue;
+    if (milestone === 0 || milestone < minMultiple) continue;
 
     await sql`
       INSERT INTO memescope_free_posts (
@@ -1029,7 +1029,7 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
 
   for (const call of calls) {
     const milestone = highestFreeResultMilestone(call.peakMultiple);
-    if (milestone === 0 || milestone < minMultiple) continue;
+    if (milestone === 0) continue;
 
     const postKey = `vip:${call.signalRecordId}:${milestone}`;
 
@@ -1169,7 +1169,7 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
       [
         vipResultText(sample),
         "",
-        "ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â <i>Formatting test only.</i>",
+        "Ã¢Å¡Â Ã¯Â¸Â <i>Formatting test only.</i>",
       ].join("\n"),
       {
         replyMarkup: freeButtons(null),
@@ -1201,7 +1201,7 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
     [
       paidAlertText(market, [candidate]),
       "",
-      "ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â <i>Formatting test only.</i>",
+      "Ã¢Å¡Â Ã¯Â¸Â <i>Formatting test only.</i>",
     ].join("\n"),
     {
       replyMarkup: freeButtons(null),

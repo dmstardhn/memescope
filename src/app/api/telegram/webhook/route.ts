@@ -1,3 +1,10 @@
+import {
+  getFreeChannelAdminSettings,
+  sendFreeChannelTest,
+  updateFreeChannelAdminSettings,
+  type FreeChannelAdminSettings,
+} from "@/lib/free-channel";
+// MEMESCOPE FREE ADMIN V2
 import { getCallDashboard } from "@/lib/call-story";
 import { tryHandleContentHqAdminRequest } from "@/lib/content-hq-v4/telegram-admin";
 import {
@@ -353,6 +360,85 @@ async function showSettings(
   );
 }
 
+function freeAdminText(settings: FreeChannelAdminSettings) {
+  const state = (value: boolean) => (value ? "🟢 ON" : "🔴 OFF");
+
+  return [
+    "<b>🆓 MemeScope FREE Channel</b>",
+    "",
+    `Channel: <b>${settings.configured ? "CONNECTED" : "NOT CONFIGURED"}</b>`,
+    `FREE System: <b>${state(settings.enabled)}</b>`,
+    `DEX Paid Alerts: <b>${state(settings.dexEnabled)}</b>`,
+    `VIP Results: <b>${state(settings.vipResultsEnabled)}</b>`,
+    `Minimum VIP Result: <b>${settings.minVipResultMultiple}X</b>`,
+    "",
+    "<i>VIP entries are never published to the FREE channel.</i>",
+  ].join("\n");
+}
+
+function freeAdminKeyboard(settings: FreeChannelAdminSettings) {
+  const checked = (value: number) =>
+    settings.minVipResultMultiple === value ? " ✅" : "";
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: settings.enabled ? "🟢 FREE ON" : "🔴 FREE OFF",
+          callback_data: "free:toggle",
+        },
+      ],
+      [
+        {
+          text: settings.dexEnabled ? "DEX Alerts: ON" : "DEX Alerts: OFF",
+          callback_data: "free:dex",
+        },
+        {
+          text: settings.vipResultsEnabled ? "VIP Results: ON" : "VIP Results: OFF",
+          callback_data: "free:vip",
+        },
+      ],
+      [
+        { text: `3X${checked(3)}`, callback_data: "free:min:3" },
+        { text: `5X${checked(5)}`, callback_data: "free:min:5" },
+        { text: `10X${checked(10)}`, callback_data: "free:min:10" },
+      ],
+      [
+        { text: "🧪 Test DEX", callback_data: "free:test:dex" },
+        { text: "🧪 Test VIP", callback_data: "free:test:vip" },
+      ],
+      [
+        { text: "🔄 Refresh", callback_data: "free:refresh" },
+      ],
+    ],
+  };
+}
+
+async function showFreeAdmin(
+  chatId: number,
+  messageId?: number,
+) {
+  const settings = await getFreeChannelAdminSettings();
+  const keyboard =
+    freeAdminKeyboard(settings) as unknown as Record<string, unknown>;
+
+  if (messageId) {
+    await telegramEditMessage(
+      chatId,
+      messageId,
+      freeAdminText(settings),
+      keyboard,
+    );
+    return;
+  }
+
+  await telegramSendMessage(
+    chatId,
+    freeAdminText(settings),
+    { replyMarkup: keyboard },
+  );
+}
+
 async function handleCallback(
   callback:
     TelegramCallbackQuery,
@@ -401,6 +487,81 @@ async function handleCallback(
         showAlert: true,
       },
     );
+    return;
+  }
+
+  if (data.startsWith("free:")) {
+    try {
+      const parts = data.split(":");
+      const action = parts[1] ?? "";
+
+      if (action === "test") {
+        const kind = parts[2] === "vip" ? "vip" : "dex";
+        await sendFreeChannelTest(kind);
+
+        await telegramAnswerCallbackQuery(
+          callbackId,
+          {
+            text: `FREE ${kind.toUpperCase()} test sent.`,
+          },
+        );
+        return;
+      }
+
+      const current =
+        await getFreeChannelAdminSettings();
+
+      if (action === "toggle") {
+        await updateFreeChannelAdminSettings({
+          enabled: !current.enabled,
+        });
+      } else if (action === "dex") {
+        await updateFreeChannelAdminSettings({
+          dexEnabled: !current.dexEnabled,
+        });
+      } else if (action === "vip") {
+        await updateFreeChannelAdminSettings({
+          vipResultsEnabled: !current.vipResultsEnabled,
+        });
+      } else if (action === "min") {
+        const raw = Number(parts[2]);
+        const minVipResultMultiple: 3 | 5 | 10 =
+          raw >= 10 ? 10 : raw >= 5 ? 5 : 3;
+
+        await updateFreeChannelAdminSettings({
+          minVipResultMultiple,
+        });
+      } else if (action !== "refresh") {
+        throw new Error("Unknown FREE Channel action.");
+      }
+
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            action === "refresh"
+              ? "Refreshed."
+              : "FREE Channel updated.",
+        },
+      );
+
+      await showFreeAdmin(
+        chatId,
+        messageId,
+      );
+    } catch (error) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            error instanceof Error
+              ? error.message.slice(0, 180)
+              : "FREE Channel action failed.",
+          showAlert: true,
+        },
+      );
+    }
+
     return;
   }
 
@@ -677,6 +838,7 @@ function helpText() {
     "<b>MemeScope Owner Bot</b>",
     "",
     "/settings - preset control panel",
+    "/free - FREE channel control panel",
     "/contenthq - Content HQ status",
     "/bindcontenthq - bind this private group as Content HQ",
     "/signals - active HQ signals",
@@ -953,6 +1115,13 @@ export async function POST(
         chatId,
         message.message_id,
         helpText(),
+      );
+    } else if (
+      command === "/free"
+    ) {
+      await showFreeAdmin(
+        chatId,
+        message.message_id,
       );
     } else if (
       command === "/settings"
