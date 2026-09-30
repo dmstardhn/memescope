@@ -604,7 +604,11 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
   const signalMap = new Map(signals.map((signal) => [signal.id, signal]));
   const marketSnapshots = await fetchMarketSnapshots(records.map((record: SignalRecordRow) => record.tokenAddress));
 
+  // MEMESCOPE CALL STORY RECORD ISOLATION
+  // One stale/broken historical record must never prevent newer
+  // calls from receiving their Call Story/public ID/market snapshot.
   for (const record of records) {
+    try {
     const token = tokenMap.get(record.tokenAddress);
     const signal = signalMap.get(record.signalId);
     const market = marketSnapshots.get(record.tokenAddress);
@@ -772,6 +776,24 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
 
     await ensurePublicId(record.id);
     await setMilestoneTimes(record.id, peakMultiple);
+    } catch (error) {
+      console.error(
+        "MemeScope Call Story record sync failed:",
+        {
+          signalRecordId: record.id,
+          signalId: record.signalId,
+          tokenAddress: record.tokenAddress,
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
+
+      // Continue with the next signal record instead of aborting
+      // the entire Call Story cycle.
+      continue;
+    }
   }
 
   return { baselineInitialized: state.initialized, tracked: records.length };
