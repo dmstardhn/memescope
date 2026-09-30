@@ -1,3 +1,4 @@
+import { tryHandleFreeButtonsAdminRequest } from "@/lib/free-buttons";
 import {
   getFreeChannelAdminSettings,
   sendFreeChannelTest,
@@ -857,7 +858,22 @@ function helpText() {
 export async function POST(
   request: Request,
 ) {
-  const contentHqAdmin = await tryHandleContentHqAdminRequest(request.clone());
+
+  const freeButtonsAdmin =
+    await tryHandleFreeButtonsAdminRequest(
+      request.clone(),
+    );
+
+  if (freeButtonsAdmin.handled) {
+    return Response.json({
+      ok: true,
+    });
+  }
+
+
+
+  
+const contentHqAdmin = await tryHandleContentHqAdminRequest(request.clone());
   if (contentHqAdmin.handled) {
     return Response.json({ ok: true });
   }

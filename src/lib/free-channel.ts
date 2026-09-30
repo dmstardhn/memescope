@@ -1,4 +1,5 @@
 import "server-only";
+import { getFreeChannelPostKeyboard } from "@/lib/free-buttons";
 
 import { createHash } from "node:crypto";
 
@@ -10,6 +11,34 @@ import {
   telegramSendMessage,
   telegramSiteUrl,
 } from "@/lib/telegram";
+
+// MEMESCOPE FREE BUTTON WRAPPER
+async function freeChannelSendMessage(
+  chatId: Parameters<typeof telegramSendMessage>[0],
+  text: Parameters<typeof telegramSendMessage>[1],
+  options?: Parameters<typeof telegramSendMessage>[2],
+) {
+  const keyboard =
+    await getFreeChannelPostKeyboard();
+
+  const nextOptions = {
+    ...(options ?? {}),
+    ...(keyboard
+      ? {
+          replyMarkup:
+            keyboard,
+        }
+      : {}),
+  } as Parameters<
+    typeof telegramSendMessage
+  >[2];
+
+  return telegramSendMessage(
+    chatId,
+    text,
+    nextOptions,
+  );
+}
 
 type DbRow = Record<string, unknown>;
 
@@ -1439,7 +1468,7 @@ async function publishDexPaidAlerts() {
         candidates.find((candidate) => candidate.dexUrl)?.dexUrl ??
         null;
 
-      const message = await telegramSendMessage(
+      const message = await freeChannelSendMessage(
         config.freeChannelId,
         paidAlertText(market, candidates),
         {
@@ -1529,7 +1558,7 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
     if (!reserved[0]) continue;
 
     try {
-      const message = await telegramSendMessage(
+      const message = await freeChannelSendMessage(
         config.freeChannelId,
         vipResultText(call),
         {
