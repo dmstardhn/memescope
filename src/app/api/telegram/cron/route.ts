@@ -100,6 +100,29 @@ export async function GET(
       secret,
     );
 
+  let freeChannel:
+    Record<string, unknown> =
+    {};
+
+  try {
+    const {
+      runFreeChannelCycle,
+    } = await import(
+      "@/lib/free-channel"
+    );
+
+    freeChannel =
+      await runFreeChannelCycle();
+  } catch (error) {
+    freeChannel = {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "FREE channel cycle failed.",
+    };
+  }
+
   let contentHq:
     Record<string, unknown> =
     {};
@@ -148,6 +171,7 @@ return NextResponse.json(
         recorder.ok,
       recorder:
         recorder.body,
+      freeChannel,
       contentHq,
     },
     {
