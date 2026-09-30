@@ -171,16 +171,16 @@ function presetText(
     "",
     "<b>Signal sensitivity</b>",
     "",
-    "ðŸ›¡ <b>SAFE</b> - tightest filtering",
+    "Ã°Å¸â€ºÂ¡ <b>SAFE</b> - tightest filtering",
     "Score >= 88 | Liq >= $100K | Vol 5m >= $12K | Momentum >= +2.5% | Confirm 2",
     "",
-    "âš–ï¸ <b>BALANCED</b> - standard mode",
+    "Ã¢Å¡â€“Ã¯Â¸Â <b>BALANCED</b> - standard mode",
     "Score >= 80 | Liq >= $50K | Vol 5m >= $10K | Momentum >= +2.0% | Confirm 1",
     "",
-    "ðŸ”¥ <b>AGGRESSIVE</b> - earlier and more frequent",
+    "Ã°Å¸â€Â¥ <b>AGGRESSIVE</b> - earlier and more frequent",
     "Score >= 62 | Liq >= $25K | Vol 5m >= $7K | Momentum >= +1.0% | Confirm 1",
     "",
-    "âš¡ <b>ULTRA</b> - most sensitive early-move preset",
+    "Ã¢Å¡Â¡ <b>ULTRA</b> - most sensitive early-move preset",
     "Score >= 52 | Liq >= $15K | Vol 5m >= $4K | Momentum >= +0.4% | Confirm 1",
     "",
     "<b>Current values</b>",
@@ -235,7 +235,7 @@ function presetKeyboard(
     text: string,
   ) =>
     current === name
-      ? `âœ… ${text}`
+      ? `Ã¢Å“â€¦ ${text}`
       : text;
 
   return {
@@ -245,7 +245,7 @@ function presetKeyboard(
           text:
             label(
               "strict",
-              "ðŸ›¡ Safe",
+              "Ã°Å¸â€ºÂ¡ Safe",
             ),
           callback_data:
             "preset:strict",
@@ -254,7 +254,7 @@ function presetKeyboard(
           text:
             label(
               "balanced",
-              "âš–ï¸ Balanced",
+              "Ã¢Å¡â€“Ã¯Â¸Â Balanced",
             ),
           callback_data:
             "preset:balanced",
@@ -265,7 +265,7 @@ function presetKeyboard(
           text:
             label(
               "aggressive",
-              "ðŸ”¥ Aggressive",
+              "Ã°Å¸â€Â¥ Aggressive",
             ),
           callback_data:
             "preset:aggressive",
@@ -274,7 +274,7 @@ function presetKeyboard(
           text:
             label(
               "ultra",
-              "âš¡ Ultra",
+              "Ã¢Å¡Â¡ Ultra",
             ),
           callback_data:
             "preset:ultra",
@@ -283,7 +283,7 @@ function presetKeyboard(
       [
         {
           text:
-            "ðŸ”„ Refresh",
+            "Ã°Å¸â€â€ž Refresh",
           callback_data:
             "preset:refresh",
         },
@@ -361,10 +361,10 @@ async function showSettings(
 }
 
 function freeAdminText(settings: FreeChannelAdminSettings) {
-  const state = (value: boolean) => (value ? "ðŸŸ¢ ON" : "ðŸ”´ OFF");
+  const state = (value: boolean) => (value ? "Ã°Å¸Å¸Â¢ ON" : "Ã°Å¸â€Â´ OFF");
 
   return [
-    "<b>ðŸ†“ MemeScope FREE Channel</b>",
+    "<b>Ã°Å¸â€ â€œ MemeScope FREE Channel</b>",
     "",
     `Channel: <b>${settings.configured ? "CONNECTED" : "NOT CONFIGURED"}</b>`,
     `FREE System: <b>${state(settings.enabled)}</b>`,
@@ -378,13 +378,13 @@ function freeAdminText(settings: FreeChannelAdminSettings) {
 
 function freeAdminKeyboard(settings: FreeChannelAdminSettings) {
   const checked = (value: number) =>
-    settings.minVipResultMultiple === value ? " âœ…" : "";
+    settings.minVipResultMultiple === value ? " Ã¢Å“â€¦" : "";
 
   return {
     inline_keyboard: [
       [
         {
-          text: settings.enabled ? "ðŸŸ¢ FREE ON" : "ðŸ”´ FREE OFF",
+          text: settings.enabled ? "Ã°Å¸Å¸Â¢ FREE ON" : "Ã°Å¸â€Â´ FREE OFF",
           callback_data: "free:toggle",
         },
       ],
@@ -404,11 +404,11 @@ function freeAdminKeyboard(settings: FreeChannelAdminSettings) {
         { text: `10X${checked(10)}`, callback_data: "free:min:10" },
       ],
       [
-        { text: "ðŸ§ª Test DEX", callback_data: "free:test:dex" },
-        { text: "ðŸ§ª Test VIP", callback_data: "free:test:vip" },
+        { text: "Ã°Å¸Â§Âª Test DEX", callback_data: "free:test:dex" },
+        { text: "Ã°Å¸Â§Âª Test VIP", callback_data: "free:test:vip" },
       ],
       [
-        { text: "ðŸ”„ Refresh", callback_data: "free:refresh" },
+        { text: "Ã°Å¸â€â€ž Refresh", callback_data: "free:refresh" },
       ],
     ],
   };
@@ -1318,7 +1318,7 @@ export async function POST(
       };
 
       const text = [
-        "<b>MemeScope Calls â€” 30D</b>",
+        "<b>MemeScope Calls Ã¢â‚¬â€ 30D</b>",
         "",
         `Calls: <b>${dashboard.totalCalls}</b>`,
         `Running: <b>${dashboard.runningCalls}</b>`,
