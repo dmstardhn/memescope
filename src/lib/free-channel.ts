@@ -293,32 +293,180 @@ function solanaRows(value: unknown) {
   );
 }
 
+// MEMESCOPE DEX BOOST V3
 async function fetchBoostCandidates(): Promise<SourceResult> {
   try {
     const body = await fetchJson(`${DEX_API}/token-boosts/latest/v1`);
-    const candidates = solanaRows(body)
-      .map((row): PaidCandidate | null => {
+
+    const rows = solanaRows(body)
+      .map((row) => {
         const tokenAddress = stringOrNull(row.tokenAddress);
         if (!tokenAddress) return null;
 
         const amount = numOrNull(row.amount) ?? 0;
         const totalAmount = numOrNull(row.totalAmount) ?? amount;
-        const dexUrl = stringOrNull(row.url);
 
         return {
-          eventKey: `boost:${tokenAddress}:${totalAmount}:${amount}`,
           tokenAddress,
-          sourceKind: "boost",
-          sourceLabel: "DEX BOOST",
-          sourceAt: null,
-          dexUrl,
+          amount,
+          totalAmount,
+          dexUrl: stringOrNull(row.url),
         };
       })
-      .filter((item): item is PaidCandidate => item !== null);
+      .filter(
+        (
+          item,
+        ): item is {
+          tokenAddress: string;
+          amount: number;
+          totalAmount: number;
+          dexUrl: string | null;
+        } => item !== null,
+      );
+
+    const sql = sqlClient();
+
+    const stateRows = await sql`
+      SELECT
+        token_address,
+        last_total_amount,
+        last_amount,
+        last_seen_at
+      FROM memescope_free_boost_state
+    `;
+
+    const state = new Map<
+      string,
+      {
+        totalAmount: number;
+        amount: number;
+        lastSeenAt: number | null;
+      }
+    >();
+
+    for (const raw of stateRows) {
+      const row = raw as DbRow;
+      const tokenAddress = String(row.token_address ?? "");
+      if (!tokenAddress) continue;
+
+      const lastSeen = row.last_seen_at
+        ? Date.parse(String(row.last_seen_at))
+        : null;
+
+      state.set(tokenAddress, {
+        totalAmount: numOrNull(row.last_total_amount) ?? 0,
+        amount: numOrNull(row.last_amount) ?? 0,
+        lastSeenAt:
+          lastSeen !== null && Number.isFinite(lastSeen)
+            ? lastSeen
+            : null,
+      });
+    }
+
+    // First V3 cycle: baseline only, no flood.
+    if (state.size === 0) {
+      for (const row of rows) {
+        await sql`
+          INSERT INTO memescope_free_boost_state (
+            token_address,
+            last_total_amount,
+            last_amount,
+            last_seen_at,
+            updated_at
+          ) VALUES (
+            ${row.tokenAddress},
+            ${row.totalAmount},
+            ${row.amount},
+            NOW(),
+            NOW()
+          )
+          ON CONFLICT (token_address)
+          DO UPDATE SET
+            last_total_amount = EXCLUDED.last_total_amount,
+            last_amount = EXCLUDED.last_amount,
+            last_seen_at = NOW(),
+            updated_at = NOW()
+        `;
+      }
+
+      return { ok: true, candidates: [] };
+    }
+
+    const now = Date.now();
+    const returnGapMs =
+      Math.max(
+        2,
+        Number(
+          process.env.MEMESCOPE_FREE_BOOST_RETURN_MINUTES ?? 3,
+        ) || 3,
+      ) * 60_000;
+
+    const candidates: PaidCandidate[] = [];
+
+    for (const row of rows) {
+      const previous = state.get(row.tokenAddress);
+      let candidate: PaidCandidate | null = null;
+
+      if (!previous) {
+        candidate = {
+          eventKey: `boost-v3:new:${row.tokenAddress}:${row.totalAmount}:${row.amount}`,
+          tokenAddress: row.tokenAddress,
+          sourceKind: "boost",
+          sourceLabel: "DEX BOOST NEW",
+          sourceAt: now,
+          dexUrl: row.dexUrl,
+        };
+      } else if (row.totalAmount > previous.totalAmount) {
+        candidate = {
+          eventKey: `boost-v3:increase:${row.tokenAddress}:${row.totalAmount}`,
+          tokenAddress: row.tokenAddress,
+          sourceKind: "boost",
+          sourceLabel: "DEX BOOST INCREASE",
+          sourceAt: now,
+          dexUrl: row.dexUrl,
+        };
+      } else if (
+        previous.lastSeenAt !== null &&
+        now - previous.lastSeenAt >= returnGapMs
+      ) {
+        candidate = {
+          eventKey: `boost-v3:return:${row.tokenAddress}:${Math.floor(now / 60_000)}`,
+          tokenAddress: row.tokenAddress,
+          sourceKind: "boost",
+          sourceLabel: "DEX BOOST RETURN",
+          sourceAt: now,
+          dexUrl: row.dexUrl,
+        };
+      }
+
+      if (candidate) candidates.push(candidate);
+
+      await sql`
+        INSERT INTO memescope_free_boost_state (
+          token_address,
+          last_total_amount,
+          last_amount,
+          last_seen_at,
+          updated_at
+        ) VALUES (
+          ${row.tokenAddress},
+          ${row.totalAmount},
+          ${row.amount},
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (token_address)
+        DO UPDATE SET
+          last_total_amount = EXCLUDED.last_total_amount,
+          last_amount = EXCLUDED.last_amount,
+          last_seen_at = NOW(),
+          updated_at = NOW()
+      `;
+    }
 
     return { ok: true, candidates };
   } catch (error) {
-    console.error("MemeScope FREE boost source failed:", error);
+    console.error("MemeScope FREE boost V3 source failed:", error);
     return { ok: false, candidates: [] };
   }
 }
@@ -872,6 +1020,21 @@ export async function ensureFreeChannelSchema() {
     await sql`
       ALTER TABLE memescope_free_channel_state
       ADD COLUMN IF NOT EXISTS dex_paid_v2_initialized_at TIMESTAMPTZ
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS memescope_free_boost_state (
+        token_address TEXT PRIMARY KEY,
+        last_total_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+        last_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await sql`
+      CREATE INDEX IF NOT EXISTS memescope_free_boost_seen_idx
+      ON memescope_free_boost_state (last_seen_at DESC)
     `;
 
     await sql`
@@ -1452,6 +1615,7 @@ export async function runFreeChannelCycle() {
   return {
     configured: true,
     enabled: true,
+    dexDetectorVersion: "v3",
     dexEnabled: settings.dexEnabled,
     vipResultsEnabled: settings.vipResultsEnabled,
     minVipResultMultiple: settings.minVipResultMultiple,
