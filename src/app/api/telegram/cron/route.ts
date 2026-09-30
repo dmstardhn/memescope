@@ -17,12 +17,24 @@ function authorized(
   const secret =
     secretValue();
 
+  const authorization =
+    request.headers
+      .get("authorization")
+      ?.trim();
+
+  const memeScopeCron =
+    request.headers
+      .get("x-memescope-cron")
+      ?.trim();
+
   return Boolean(
     secret &&
-      request.headers.get(
-        "authorization",
-      ) ===
-        `Bearer ${secret}`,
+      (
+        authorization ===
+          `Bearer ${secret}` ||
+        memeScopeCron ===
+          secret
+      ),
   );
 }
 
