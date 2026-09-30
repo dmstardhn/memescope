@@ -1437,5 +1437,20 @@ export async function runCallStoryCycle(tokens: TerminalToken[], signals: Signal
   await discoverContentOpportunities();
   const content = await publishPendingContentOpportunities();
   const reports = await publishScheduledReports();
-  return { sync, milestones, content, reports };
+
+  let freeChannel = {
+    configured: false,
+    initialized: false,
+    dexPaidSent: 0,
+    vipResultsSent: 0,
+  };
+
+  try {
+    const { runFreeChannelCycle } = await import("@/lib/free-channel");
+    freeChannel = await runFreeChannelCycle();
+  } catch (error) {
+    console.error("MemeScope FREE channel cycle failed:", error);
+  }
+
+  return { sync, milestones, content, reports, freeChannel };
 }
