@@ -405,92 +405,269 @@ function paidOrders(value: unknown): PaidOrder[] {
 }
 
 function validPaidOrder(order: PaidOrder) {
+  const status = order.status.toLowerCase();
+
   return (
     order.paymentTimestamp !== null &&
-    (order.status === "approved" ||
-      order.status === "processing" ||
-      order.status === "on-hold")
+    (status === "approved" ||
+      status === "processing" ||
+      status === "on-hold")
   );
 }
 
-async function fetchProfileOrderCandidate(
-  row: Record<string, unknown>,
-): Promise<PaidCandidate | null> {
-  const tokenAddress = stringOrNull(row.tokenAddress);
-  if (!tokenAddress) return null;
+// MEMESCOPE DEX PAID V2.1
+function paidOrderSource(
+  type: string,
+): Pick<PaidCandidate, "sourceKind" | "sourceLabel"> | null {
+  const normalized = type
+    .replace(/[_\s-]+/g, "")
+    .toLowerCase();
 
+  if (normalized === "tokenprofile") {
+    return {
+      sourceKind: "profile",
+      sourceLabel: "TOKEN PROFILE",
+    };
+  }
+
+  if (normalized === "communitytakeover") {
+    return {
+      sourceKind: "community_takeover",
+      sourceLabel: "COMMUNITY TAKEOVER",
+    };
+  }
+
+  if (normalized === "trendingbarad") {
+    return {
+      sourceKind: "ad",
+      sourceLabel: "TRENDING BAR AD",
+    };
+  }
+
+  if (normalized === "tokenad") {
+    return {
+      sourceKind: "ad",
+      sourceLabel: "DEX AD",
+    };
+  }
+
+  return null;
+}
+
+async function fetchTokenPaidOrderCandidates(
+  tokenAddress: string,
+  dexUrl: string | null,
+): Promise<PaidCandidate[]> {
   try {
     const body = await fetchJson(
       `${DEX_API}/orders/v1/solana/${encodeURIComponent(tokenAddress)}`,
     );
 
-    const profileOrders = paidOrders(body)
-      .filter(
-        (order) => order.type === "tokenProfile" && validPaidOrder(order),
-      )
-      .sort(
-        (a, b) =>
-          (b.paymentTimestamp ?? 0) - (a.paymentTimestamp ?? 0),
-      );
+    const newestByType = new Map<string, PaidOrder>();
 
-    const order = profileOrders[0];
-    if (!order || order.paymentTimestamp === null) return null;
+    for (const order of paidOrders(body)) {
+      if (!validPaidOrder(order) || order.paymentTimestamp === null) continue;
 
-    return {
-      eventKey: `profile:${tokenAddress}:${order.paymentTimestamp}`,
-      tokenAddress,
-      sourceKind: "profile",
-      sourceLabel: "TOKEN PROFILE",
-      sourceAt: order.paymentTimestamp,
-      dexUrl: stringOrNull(row.url),
-    };
-  } catch {
-    return null;
+      const source = paidOrderSource(order.type);
+      if (!source) continue;
+
+      const key = order.type
+        .replace(/[_\s-]+/g, "")
+        .toLowerCase();
+
+      const previous = newestByType.get(key);
+
+      if (
+        !previous ||
+        (order.paymentTimestamp ?? 0) >
+          (previous.paymentTimestamp ?? 0)
+      ) {
+        newestByType.set(key, order);
+      }
+    }
+
+    return Array.from(newestByType.values())
+      .map((order): PaidCandidate | null => {
+        if (order.paymentTimestamp === null) return null;
+
+        const source = paidOrderSource(order.type);
+        if (!source) return null;
+
+        return {
+          eventKey:
+            `order:${tokenAddress}:${order.type}:${order.paymentTimestamp}`,
+          tokenAddress,
+          sourceKind: source.sourceKind,
+          sourceLabel: source.sourceLabel,
+          sourceAt: order.paymentTimestamp,
+          dexUrl,
+        };
+      })
+      .filter((item): item is PaidCandidate => item !== null);
+  } catch (error) {
+    console.error(
+      `MemeScope FREE paid-order check failed for ${tokenAddress}:`,
+      error,
+    );
+    return [];
   }
 }
 
 async function fetchProfileCandidates(): Promise<SourceResult> {
   try {
-    const body = await fetchJson(`${DEX_API}/token-profiles/latest/v1`);
-    const rows = solanaRows(body).slice(0, 30);
-    const candidates: PaidCandidate[] = [];
+    const body = await fetchJson(
+      `${DEX_API}/token-profiles/latest/v1`,
+    );
 
-    // Limit concurrency to stay comfortably inside the 60 rpm paid-order limit.
-    for (let index = 0; index < rows.length; index += 5) {
-      const batch = rows.slice(index, index + 5);
-      const checked = await Promise.all(batch.map(fetchProfileOrderCandidate));
+    const candidates = solanaRows(body)
+      .map((row): PaidCandidate | null => {
+        const tokenAddress =
+          stringOrNull(row.tokenAddress);
 
-      for (const candidate of checked) {
-        if (candidate) candidates.push(candidate);
+        if (!tokenAddress) return null;
+
+        return {
+          eventKey:
+            `profile-feed:${tokenAddress}`,
+          tokenAddress,
+          sourceKind: "profile",
+          sourceLabel: "TOKEN PROFILE",
+          sourceAt: null,
+          dexUrl: stringOrNull(row.url),
+        };
+      })
+      .filter(
+        (item): item is PaidCandidate =>
+          item !== null,
+      );
+
+    return {
+      ok: true,
+      candidates,
+    };
+  } catch (error) {
+    console.error(
+      "MemeScope FREE profile source failed:",
+      error,
+    );
+
+    return {
+      ok: false,
+      candidates: [],
+    };
+  }
+}
+
+async function fetchPaidOrderCandidates(
+  seeds: PaidCandidate[],
+): Promise<SourceResult> {
+  try {
+    const dexUrlByToken =
+      new Map<string, string | null>();
+
+    for (const seed of seeds) {
+      if (
+        !dexUrlByToken.has(seed.tokenAddress) ||
+        seed.dexUrl
+      ) {
+        dexUrlByToken.set(
+          seed.tokenAddress,
+          seed.dexUrl,
+        );
       }
     }
 
-    return { ok: true, candidates };
+    // 30 order lookups + the discovery feeds keeps the
+    // one-minute cycle comfortably below the 60 rpm family.
+    const tokens =
+      Array.from(dexUrlByToken.keys())
+        .slice(0, 30);
+
+    const candidates: PaidCandidate[] = [];
+
+    for (
+      let index = 0;
+      index < tokens.length;
+      index += 5
+    ) {
+      const batch =
+        tokens.slice(index, index + 5);
+
+      const results =
+        await Promise.all(
+          batch.map((tokenAddress) =>
+            fetchTokenPaidOrderCandidates(
+              tokenAddress,
+              dexUrlByToken.get(tokenAddress) ??
+                null,
+            ),
+          ),
+        );
+
+      for (const rows of results) {
+        candidates.push(...rows);
+      }
+    }
+
+    return {
+      ok: true,
+      candidates,
+    };
   } catch (error) {
-    console.error("MemeScope FREE profile source failed:", error);
-    return { ok: false, candidates: [] };
+    console.error(
+      "MemeScope FREE paid-order discovery failed:",
+      error,
+    );
+
+    return {
+      ok: false,
+      candidates: [],
+    };
   }
 }
 
 async function discoverPaidCandidates() {
-  const results = await Promise.all([
+  const feedResults = await Promise.all([
     fetchBoostCandidates(),
     fetchAdCandidates(),
     fetchCommunityTakeoverCandidates(),
     fetchProfileCandidates(),
   ]);
 
-  const map = new Map<string, PaidCandidate>();
+  const feedCandidates =
+    feedResults.flatMap(
+      (result) => result.candidates,
+    );
+
+  const orderResult =
+    await fetchPaidOrderCandidates(
+      feedCandidates,
+    );
+
+  const results = [
+    ...feedResults,
+    orderResult,
+  ];
+
+  const map =
+    new Map<string, PaidCandidate>();
 
   for (const result of results) {
     for (const candidate of result.candidates) {
-      map.set(candidate.eventKey, candidate);
+      map.set(
+        candidate.eventKey,
+        candidate,
+      );
     }
   }
 
   return {
-    successfulSources: results.filter((result) => result.ok).length,
-    candidates: Array.from(map.values()),
+    successfulSources:
+      results.filter(
+        (result) => result.ok,
+      ).length,
+    candidates:
+      Array.from(map.values()),
   };
 }
 
@@ -693,6 +870,11 @@ export async function ensureFreeChannelSchema() {
     `;
 
     await sql`
+      ALTER TABLE memescope_free_channel_state
+      ADD COLUMN IF NOT EXISTS dex_paid_v2_initialized_at TIMESTAMPTZ
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS memescope_free_dex_events (
         event_key TEXT PRIMARY KEY,
         token_address TEXT NOT NULL,
@@ -788,6 +970,84 @@ async function baselineDexPaidEvents() {
   `;
 
   return { initialized: true, baselineCount };
+}
+
+async function baselineDexPaidV2Events() {
+  const sql = sqlClient();
+
+  const stateRows = await sql`
+    SELECT dex_paid_v2_initialized_at
+    FROM memescope_free_channel_state
+    WHERE id = 1
+    LIMIT 1
+  `;
+
+  if (
+    (stateRows[0] as DbRow | undefined)
+      ?.dex_paid_v2_initialized_at
+  ) {
+    return {
+      initialized: false,
+      baselineCount: 0,
+    };
+  }
+
+  const discovered =
+    await discoverPaidCandidates();
+
+  if (discovered.successfulSources === 0) {
+    return {
+      initialized: false,
+      baselineCount: 0,
+    };
+  }
+
+  let baselineCount = 0;
+
+  for (const candidate of discovered.candidates) {
+    const inserted = await sql`
+      INSERT INTO memescope_free_dex_events (
+        event_key,
+        token_address,
+        source_kind,
+        source_label,
+        source_at,
+        baseline
+      ) VALUES (
+        ${candidate.eventKey},
+        ${candidate.tokenAddress},
+        ${candidate.sourceKind},
+        ${candidate.sourceLabel},
+        ${
+          candidate.sourceAt === null
+            ? null
+            : new Date(
+                candidate.sourceAt,
+              ).toISOString()
+        },
+        TRUE
+      )
+      ON CONFLICT (event_key) DO NOTHING
+      RETURNING event_key
+    `;
+
+    if (inserted[0]) {
+      baselineCount += 1;
+    }
+  }
+
+  await sql`
+    UPDATE memescope_free_channel_state
+    SET
+      dex_paid_v2_initialized_at = NOW(),
+      updated_at = NOW()
+    WHERE id = 1
+  `;
+
+  return {
+    initialized: true,
+    baselineCount,
+  };
 }
 
 async function currentVipResults(): Promise<VipResultRow[]> {
@@ -913,19 +1173,69 @@ async function publishDexPaidAlerts() {
     grouped.set(candidate.tokenAddress, list);
   }
 
-  const groups = Array.from(grouped.entries())
-    .sort((a, b) => {
-      const aAt = Math.max(...a[1].map((item) => item.sourceAt ?? 0));
-      const bAt = Math.max(...b[1].map((item) => item.sourceAt ?? 0));
-      return bAt - aAt;
-    })
-    .slice(0, Math.max(1, Math.min(10, Number(process.env.MEMESCOPE_FREE_DEX_MAX_PER_CYCLE ?? 6) || 6)));
+  const allGroups =
+    Array.from(grouped.entries())
+      .sort((a, b) => {
+        const aAt = Math.max(
+          ...a[1].map(
+            (item) => item.sourceAt ?? 0,
+          ),
+        );
+        const bAt = Math.max(
+          ...b[1].map(
+            (item) => item.sourceAt ?? 0,
+          ),
+        );
 
-  if (groups.length === 0) {
-    return { sent: 0, discovered: discovered.candidates.length };
+        return bAt - aAt;
+      });
+
+  if (allGroups.length === 0) {
+    return {
+      sent: 0,
+      discovered:
+        discovered.candidates.length,
+    };
   }
 
-  const markets = await fetchMarketSnapshots(groups.map(([address]) => address));
+  // Resolve markets before limiting the queue.
+  // Unindexed tokens can no longer block valid alerts behind them.
+  const markets =
+    await fetchMarketSnapshots(
+      allGroups.map(
+        ([address]) => address,
+      ),
+    );
+
+  const groups =
+    allGroups
+      .filter(
+        ([address]) =>
+          markets.has(address),
+      )
+      .slice(
+        0,
+        Math.max(
+          1,
+          Math.min(
+            10,
+            Number(
+              process.env
+                .MEMESCOPE_FREE_DEX_MAX_PER_CYCLE ??
+                6,
+            ) || 6,
+          ),
+        ),
+      );
+
+  if (groups.length === 0) {
+    return {
+      sent: 0,
+      discovered:
+        discovered.candidates.length,
+    };
+  }
+
   let sent = 0;
 
   for (const [tokenAddress, candidates] of groups) {
@@ -1113,14 +1423,24 @@ export async function runFreeChannelCycle() {
     ? await baselineDexPaidEvents()
     : { initialized: false, baselineCount: 0 };
 
+  const dexV2Baseline = settings.dexEnabled
+    ? await baselineDexPaidV2Events()
+    : { initialized: false, baselineCount: 0 };
+
   const vipBaseline = settings.vipResultsEnabled
     ? await baselineVipResults()
     : { initialized: false, baselineCount: 0 };
 
   const dex = !settings.dexEnabled
     ? { sent: 0, discovered: 0 }
-    : dexBaseline.initialized
-      ? { sent: 0, discovered: dexBaseline.baselineCount }
+    : dexBaseline.initialized ||
+        dexV2Baseline.initialized
+      ? {
+          sent: 0,
+          discovered:
+            dexBaseline.baselineCount +
+            dexV2Baseline.baselineCount,
+        }
       : await publishDexPaidAlerts();
 
   const vip = !settings.vipResultsEnabled
@@ -1135,8 +1455,14 @@ export async function runFreeChannelCycle() {
     dexEnabled: settings.dexEnabled,
     vipResultsEnabled: settings.vipResultsEnabled,
     minVipResultMultiple: settings.minVipResultMultiple,
-    initialized: dexBaseline.initialized || vipBaseline.initialized,
-    dexBaselineCount: dexBaseline.baselineCount,
+    initialized:
+      dexBaseline.initialized ||
+      dexV2Baseline.initialized ||
+      vipBaseline.initialized,
+    dexBaselineCount:
+      dexBaseline.baselineCount,
+    dexV2BaselineCount:
+      dexV2Baseline.baselineCount,
     vipBaselineCount: vipBaseline.baselineCount,
     dexPaidSent: dex.sent,
     vipResultsSent: vip.sent,
