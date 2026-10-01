@@ -671,6 +671,7 @@ export async function recordSignalSnapshot(
   let blockedByCooldown = 0;
   let rekeyedActive = 0;
   let deduped = 0;
+  const openedRecordIds: string[] = [];
 
   // Stage 19.2: preset-driven consecutive confirmation.
   // A more aggressive preset can open on the first qualifying scan,
@@ -942,6 +943,7 @@ export async function recordSignalSnapshot(
 
     if (insertedRows.length > 0) {
       opened += 1;
+      openedRecordIds.push(id);
       lastOpenedByToken.set(
         signal.tokenAddress,
         nowMs,
@@ -993,7 +995,7 @@ export async function recordSignalSnapshot(
       );
 
     const result =
-      await publishPendingTelegramSignals();
+      await publishPendingTelegramSignals(openedRecordIds);
 
     telegramPublisher = {
       ok: true,

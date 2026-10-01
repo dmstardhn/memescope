@@ -849,11 +849,14 @@ export async function initializeTelegramBaseline() {
   };
 }
 
-export async function publishPendingTelegramSignals() {
+export async function publishPendingTelegramSignals(
+  recordIds: string[] = [],
+) {
   if (!telegramConfigured()) {
     return {
       configured: false,
       initialized: false,
+      directRecordCount: recordIds.length,
       attempted: 0,
       sent: 0,
       failed: 0,
@@ -866,45 +869,82 @@ export async function publishPendingTelegramSignals() {
 
   await ensureTelegramPublisherSchema();
 
-  const baseline =
-    await initializeTelegramBaseline();
+  const sql = sqlClient();
+  const { channelId } = telegramConfig();
 
-  if (baseline.initialized) {
-    return {
-      configured: true,
-      initialized: true,
-      baselineCount:
-        baseline.baselineCount,
-      attempted: 0,
-      sent: 0,
-      failed: 0,
-      mediaFallbacks: 0,
-      lastError: null,
-      edited: 0,
-      targetReplies: 0,
-    };
-  }
+  let initialized = false;
+  let baselineCount = 0;
+  let rows: DbRow[] = [];
 
-  const sql =
-    sqlClient();
+  // Fresh records opened by THIS recorder invocation bypass the historical
+  // baseline selector. This makes opening + Telegram delivery one atomic
+  // application flow while the DB post table still prevents repeat sends.
+  const directIds = Array.from(
+    new Set(
+      recordIds
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 25);
 
-  const { channelId } =
-    telegramConfig();
+  if (directIds.length > 0) {
+    for (const recordId of directIds) {
+      const found = await sql\`
+        SELECT
+          r.*,
+          p.message_id AS telegram_message_id
+        FROM memescope_signal_records r
+        LEFT JOIN memescope_telegram_posts p
+          ON p.signal_record_id = r.id
+        WHERE r.id = \${recordId}
+        LIMIT 1
+      \`;
 
-  const rows =
-    await sql`
+      if (found[0]) {
+        rows.push(found[0] as DbRow);
+      }
+    }
+  } else {
+    const baseline = await initializeTelegramBaseline();
+    initialized = baseline.initialized;
+    baselineCount = baseline.baselineCount ?? 0;
+
+    if (baseline.initialized) {
+      return {
+        configured: true,
+        initialized: true,
+        baselineCount,
+        directRecordCount: 0,
+        attempted: 0,
+        sent: 0,
+        failed: 0,
+        mediaFallbacks: 0,
+        lastError: null,
+        edited: 0,
+        targetReplies: 0,
+      };
+    }
+
+    rows = (await sql\`
       SELECT
         r.*,
         p.message_id AS telegram_message_id
       FROM memescope_signal_records r
       LEFT JOIN memescope_telegram_posts p
         ON p.signal_record_id = r.id
-      WHERE r.opened_at > ${new Date(
-        baseline.initializedAt,
-      ).toISOString()}
+      WHERE (
+        r.opened_at > \${new Date(
+          baseline.initializedAt,
+        ).toISOString()}
+        OR (
+          r.opened_at >= NOW() - INTERVAL '30 minutes'
+          AND p.message_id IS NULL
+        )
+      )
       ORDER BY r.opened_at ASC
       LIMIT 150
-    `;
+    \`) as DbRow[];
+  }
 
   let attempted = 0;
   let sent = 0;
@@ -913,156 +953,134 @@ export async function publishPendingTelegramSignals() {
   let lastError: string | null = null;
 
   for (const raw of rows) {
-    const row =
-      raw as DbRow;
+    const record = normalizeRecord(raw);
+    const messageId = numOrNull(raw.telegram_message_id);
 
-    const record =
-      normalizeRecord(row);
-
-    const messageId =
-      numOrNull(
-        row.telegram_message_id,
-      );
-
-    if (messageId === null) {
-      attempted += 1;
-
-      try {
-        const text =
-          await channelText(record);
-        const photoUrl =
-          await resolveSignalPhotoUrl(
-            record.tokenAddress,
-          );
-
-        let message;
-
-        if (photoUrl) {
-          try {
-            message =
-              await telegramSendPhoto(
-                channelId,
-                photoUrl,
-                {
-                  caption: text,
-                  replyMarkup:
-                    signalButtons(
-                      record,
-                    ),
-                },
-              );
-          } catch (mediaError) {
-            mediaFallbacks += 1;
-            console.error(
-              "MemeScope VIP media send failed; falling back to text for " +
-                record.tokenAddress +
-                ":",
-              mediaError,
-            );
-
-            message =
-              await telegramSendMessage(
-                channelId,
-                text,
-                {
-                  replyMarkup:
-                    signalButtons(
-                      record,
-                    ),
-                },
-              );
-          }
-        } else {
-          message =
-            await telegramSendMessage(
-              channelId,
-              text,
-              {
-                replyMarkup:
-                  signalButtons(
-                    record,
-                  ),
-              },
-            );
-        }
-
-        await sql`
-          INSERT INTO memescope_telegram_posts (
-            signal_record_id,
-            signal_id,
-            channel_id,
-            message_id,
-            baseline,
-            first_sent_at,
-            last_edited_at,
-            last_status,
-            last_current_gain_pct,
-            last_peak_gain_pct,
-            last_drawdown_pct
-          )
-          VALUES (
-            ${record.id},
-            ${record.signalId},
-            ${channelId},
-            ${message.message_id},
-            FALSE,
-            NOW(),
-            NULL,
-            ${record.status},
-            ${record.currentGainPercent},
-            ${record.peakGainPercent},
-            ${record.maxDrawdownPercent}
-          )
-          ON CONFLICT (signal_record_id)
-          DO UPDATE SET
-            message_id = COALESCE(
-              memescope_telegram_posts.message_id,
-              EXCLUDED.message_id
-            ),
-            channel_id = EXCLUDED.channel_id,
-            first_sent_at = COALESCE(
-              memescope_telegram_posts.first_sent_at,
-              NOW()
-            ),
-            last_status = EXCLUDED.last_status,
-            last_current_gain_pct = EXCLUDED.last_current_gain_pct,
-            last_peak_gain_pct = EXCLUDED.last_peak_gain_pct,
-            last_drawdown_pct = EXCLUDED.last_drawdown_pct
-        `;
-
-        sent += 1;
-      } catch (error) {
-        failed += 1;
-        lastError =
-          error instanceof Error
-            ? error.message
-            : "Unknown Telegram publisher error.";
-
-        console.error(
-          "MemeScope VIP signal publish failed for " +
-            record.tokenAddress +
-            ":",
-          error,
-        );
-      }
-
+    if (messageId !== null) {
+      await sql\`
+        UPDATE memescope_telegram_posts
+        SET
+          last_status = \${record.status},
+          last_current_gain_pct = \${record.currentGainPercent},
+          last_peak_gain_pct = \${record.peakGainPercent},
+          last_drawdown_pct = \${record.maxDrawdownPercent}
+        WHERE signal_record_id = \${record.id}
+      \`;
       continue;
     }
 
-    await sql`
-      UPDATE memescope_telegram_posts
-      SET
-        last_status = ${record.status},
-        last_current_gain_pct = ${record.currentGainPercent},
-        last_peak_gain_pct = ${record.peakGainPercent},
-        last_drawdown_pct = ${record.maxDrawdownPercent}
-      WHERE signal_record_id = ${record.id}
-    `;
+    attempted += 1;
+
+    try {
+      const text = await channelText(record);
+      const photoUrl = await resolveSignalPhotoUrl(record.tokenAddress);
+
+      let message;
+
+      if (photoUrl) {
+        try {
+          message = await telegramSendPhoto(
+            channelId,
+            photoUrl,
+            {
+              caption: text,
+              replyMarkup: signalButtons(record),
+            },
+          );
+        } catch (mediaError) {
+          mediaFallbacks += 1;
+          console.error(
+            'MemeScope VIP media send failed; falling back to text for ' +
+              record.tokenAddress +
+              ':',
+            mediaError,
+          );
+
+          message = await telegramSendMessage(
+            channelId,
+            text,
+            {
+              replyMarkup: signalButtons(record),
+            },
+          );
+        }
+      } else {
+        message = await telegramSendMessage(
+          channelId,
+          text,
+          {
+            replyMarkup: signalButtons(record),
+          },
+        );
+      }
+
+      await sql\`
+        INSERT INTO memescope_telegram_posts (
+          signal_record_id,
+          signal_id,
+          channel_id,
+          message_id,
+          baseline,
+          first_sent_at,
+          last_edited_at,
+          last_status,
+          last_current_gain_pct,
+          last_peak_gain_pct,
+          last_drawdown_pct
+        )
+        VALUES (
+          \${record.id},
+          \${record.signalId},
+          \${channelId},
+          \${message.message_id},
+          FALSE,
+          NOW(),
+          NULL,
+          \${record.status},
+          \${record.currentGainPercent},
+          \${record.peakGainPercent},
+          \${record.maxDrawdownPercent}
+        )
+        ON CONFLICT (signal_record_id)
+        DO UPDATE SET
+          message_id = COALESCE(
+            memescope_telegram_posts.message_id,
+            EXCLUDED.message_id
+          ),
+          channel_id = EXCLUDED.channel_id,
+          baseline = FALSE,
+          first_sent_at = COALESCE(
+            memescope_telegram_posts.first_sent_at,
+            NOW()
+          ),
+          last_status = EXCLUDED.last_status,
+          last_current_gain_pct = EXCLUDED.last_current_gain_pct,
+          last_peak_gain_pct = EXCLUDED.last_peak_gain_pct,
+          last_drawdown_pct = EXCLUDED.last_drawdown_pct
+      \`;
+
+      sent += 1;
+    } catch (error) {
+      failed += 1;
+      lastError =
+        error instanceof Error
+          ? error.message
+          : 'Unknown Telegram publisher error.';
+
+      console.error(
+        'MemeScope VIP signal publish failed for ' +
+          record.tokenAddress +
+          ':',
+        error,
+      );
+    }
   }
 
   return {
     configured: true,
-    initialized: false,
+    initialized,
+    baselineCount,
+    directRecordCount: directIds.length,
     attempted,
     sent,
     failed,
