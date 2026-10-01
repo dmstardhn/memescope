@@ -227,6 +227,102 @@ export async function telegramSendPhoto(
   );
 }
 
+export async function telegramSendPhotoUpload(
+  chatId: string | number,
+  photo: Blob,
+  options?: {
+    caption?: string;
+    replyMarkup?: Record<
+      string,
+      unknown
+    >;
+    replyToMessageId?: number;
+  },
+) {
+  const { botToken } =
+    telegramConfig();
+
+  if (!botToken) {
+    throw new Error(
+      "TELEGRAM_BOT_TOKEN is not configured.",
+    );
+  }
+
+  const form =
+    new FormData();
+
+  form.append(
+    "chat_id",
+    String(chatId),
+  );
+  form.append(
+    "photo",
+    photo,
+    "memescope-token.jpg",
+  );
+
+  if (options?.caption) {
+    form.append(
+      "caption",
+      options.caption,
+    );
+    form.append(
+      "parse_mode",
+      "HTML",
+    );
+  }
+
+  if (options?.replyMarkup) {
+    form.append(
+      "reply_markup",
+      JSON.stringify(
+        options.replyMarkup,
+      ),
+    );
+  }
+
+  if (options?.replyToMessageId) {
+    form.append(
+      "reply_parameters",
+      JSON.stringify({
+        message_id:
+          options.replyToMessageId,
+      }),
+    );
+  }
+
+  const response =
+    await fetch(
+      `https://api.telegram.org/bot${botToken}/sendPhoto`,
+      {
+        method: "POST",
+        body: form,
+        cache: "no-store",
+        signal:
+          AbortSignal.timeout(
+            15_000,
+          ),
+      },
+    );
+
+  const body =
+    (await response.json()) as
+      TelegramApiResponse<TelegramMessageResult>;
+
+  if (
+    !response.ok ||
+    !body.ok ||
+    body.result === undefined
+  ) {
+    throw new Error(
+      body.description ??
+        "Telegram sendPhoto upload failed.",
+    );
+  }
+
+  return body.result;
+}
+
 export async function telegramEditMessage(
   chatId: string | number,
   messageId: number,

@@ -4,12 +4,14 @@ import { getFreeChannelPostKeyboard } from "@/lib/free-buttons";
 import { createHash } from "node:crypto";
 
 import { neon } from "@neondatabase/serverless";
+import sharp from "sharp";
 
 import {
   escapeTelegramHtml,
   telegramConfig,
   telegramSendMessage,
   telegramSendPhoto,
+  telegramSendPhotoUpload,
   telegramSiteUrl,
 } from "@/lib/telegram";
 
@@ -85,6 +87,50 @@ async function freeChannelSendMessage(
   );
 }
 
+async function prepareFreeChannelPhoto(
+  photoUrl: string,
+) {
+  const response =
+    await fetch(photoUrl, {
+      cache: "no-store",
+      signal:
+        AbortSignal.timeout(
+          10_000,
+        ),
+    });
+
+  if (!response.ok) {
+    throw new Error(
+      `Token media download failed (${response.status}).`,
+    );
+  }
+
+  const input =
+    Buffer.from(
+      await response.arrayBuffer(),
+    );
+
+  const output =
+    await sharp(input)
+      .rotate()
+      .resize(1200, 675, {
+        fit: "cover",
+        position: "attention",
+      })
+      .jpeg({
+        quality: 90,
+        mozjpeg: true,
+      })
+      .toBuffer();
+
+  return new Blob(
+    [new Uint8Array(output)],
+    {
+      type: "image/jpeg",
+    },
+  );
+}
+
 async function freeChannelSendPhotoMessage(
   chatId: Parameters<typeof telegramSendPhoto>[0],
   photo: Parameters<typeof telegramSendPhoto>[1],
@@ -154,11 +200,45 @@ async function freeChannelSendPhotoMessage(
     typeof telegramSendPhoto
   >[2];
 
-  return telegramSendPhoto(
-    chatId,
-    photo,
-    nextOptions,
-  );
+  try {
+    const cropped =
+      await prepareFreeChannelPhoto(
+        photo,
+      );
+
+    return await telegramSendPhotoUpload(
+      chatId,
+      cropped,
+      nextOptions,
+    );
+  } catch (error) {
+    console.error(
+      "MemeScope FREE image crop/upload failed, using original media:",
+      error,
+    );
+  }
+
+  try {
+    return await telegramSendPhoto(
+      chatId,
+      photo,
+      nextOptions,
+    );
+  } catch (error) {
+    console.error(
+      "MemeScope FREE original media failed, using text fallback:",
+      error,
+    );
+
+    return freeChannelSendMessage(
+      chatId,
+      caption,
+      {
+        replyMarkup:
+          mergedKeyboard,
+      },
+    );
+  }
 }
 
 type DbRow = Record<string, unknown>;
@@ -1036,14 +1116,114 @@ async function fetchMarketSnapshots(addresses: string[]) {
   return result;
 }
 
-function preferredMarketMedia(
+type FreeTokenMedia = {
+  bannerUrl: string | null;
+  imageUrl: string | null;
+};
+
+let freeProfileMediaCache:
+  | {
+      loadedAt: number;
+      byToken: Map<
+        string,
+        FreeTokenMedia
+      >;
+    }
+  | null = null;
+
+async function getFreeProfileMediaMap() {
+  const now =
+    Date.now();
+
+  if (
+    freeProfileMediaCache &&
+    now -
+      freeProfileMediaCache.loadedAt <
+      30_000
+  ) {
+    return freeProfileMediaCache.byToken;
+  }
+
+  const byToken =
+    new Map<
+      string,
+      FreeTokenMedia
+    >();
+
+  try {
+    const body =
+      await fetchJson(
+        `${DEX_API}/token-profiles/latest/v1`,
+      );
+
+    for (const row of objectArray(
+      body,
+    )) {
+      if (
+        stringOrNull(
+          row.chainId,
+        ) !== "solana"
+      ) {
+        continue;
+      }
+
+      const tokenAddress =
+        stringOrNull(
+          row.tokenAddress,
+        );
+
+      if (!tokenAddress) {
+        continue;
+      }
+
+      byToken.set(
+        tokenAddress,
+        {
+          bannerUrl:
+            stringOrNull(
+              row.header,
+            ) ??
+            stringOrNull(
+              row.openGraph,
+            ),
+          imageUrl:
+            stringOrNull(
+              row.icon,
+            ),
+        },
+      );
+    }
+  } catch (error) {
+    console.error(
+      "MemeScope FREE profile media lookup failed:",
+      error,
+    );
+  }
+
+  freeProfileMediaCache = {
+    loadedAt: now,
+    byToken,
+  };
+
+  return byToken;
+}
+
+async function resolveFreeTokenMedia(
+  tokenAddress: string,
   market:
     | MarketSnapshot
     | null
     | undefined,
 ) {
+  const profiles =
+    await getFreeProfileMediaMap();
+  const profile =
+    profiles.get(tokenAddress);
+
   return (
+    profile?.bannerUrl ??
     market?.bannerUrl ??
+    profile?.imageUrl ??
     market?.imageUrl ??
     null
   );
@@ -1087,33 +1267,32 @@ function freeButtons(dexUrl: string | null) {
 
 function paidAlertText(
   market: MarketSnapshot,
-  candidates: PaidCandidate[],
+  _candidates: PaidCandidate[],
 ) {
-  const labels = Array.from(
-    new Set(candidates.map((candidate) => cleanLabel(candidate.sourceLabel))),
-  );
-
   return [
-    "⚡ <b>MEMESCOPE DEX WATCH</b>",
+    "📢 <b>DEX PAID ALERT</b>",
     "",
-    "🟠 <b>PAID ACTIVITY DETECTED</b>",
+    `${escapeTelegramHtml(
+      market.name,
+    )} | <b>$${escapeTelegramHtml(
+      market.symbol,
+    )}</b>`,
     "",
-    `<b>$${escapeTelegramHtml(market.symbol)}</b> | ${escapeTelegramHtml(market.name)}`,
+    `├ 💰 MC <b>${compactUsd(
+      market.marketCapUsd,
+    )}</b>`,
+    `├ 📊 Vol 24h <b>${compactUsd(
+      market.volume24hUsd,
+    )}</b>`,
+    `└ 💧 Liq <b>${compactUsd(
+      market.liquidityUsd,
+    )}</b>`,
     "",
-    "╭─ <b>MARKET SNAPSHOT</b>",
-    `├ 💰 Market Cap <b>${compactUsd(market.marketCapUsd)}</b>`,
-    `├ 💧 Liquidity <b>${compactUsd(market.liquidityUsd)}</b>`,
-    `├ 📊 Volume 24h <b>${compactUsd(market.volume24hUsd)}</b>`,
-    `╰ 🧾 DEX Activity <b>${escapeTelegramHtml(labels.join(" + "))}</b>`,
+    `CA: <code>${escapeTelegramHtml(
+      market.tokenAddress,
+    )}</code>`,
     "",
-    "📋 <b>Contract</b>",
-    `<code>${escapeTelegramHtml(market.tokenAddress)}</code>`,
-    "",
-    "⚠️ <i>Paid DEX activity detected. This is market activity, not a MemeScope VIP signal.</i>",
-    "",
-    "🔒 <b>VIP sees the calls before selected results.</b>",
-    "",
-    "<b>MemeScope</b>",
+    "⚠️ <i>Paid DexScreener activity detected — not a VIP signal.</i>",
   ].join("\n");
 }
 
@@ -1617,7 +1796,8 @@ async function publishDexPaidAlerts() {
         candidates.find((candidate) => candidate.dexUrl)?.dexUrl ??
         null;
       const mediaUrl =
-        preferredMarketMedia(
+        await resolveFreeTokenMedia(
+          tokenAddress,
           market,
         );
       const text =
@@ -1739,7 +1919,8 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
 
     try {
       const mediaUrl =
-        preferredMarketMedia(
+        await resolveFreeTokenMedia(
+          call.tokenAddress,
           markets.get(
             call.tokenAddress,
           ),
