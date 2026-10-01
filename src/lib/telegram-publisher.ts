@@ -937,7 +937,7 @@ export async function publishPendingTelegramSignals(
           baseline.initializedAt,
         ).toISOString()}
         OR (
-          r.opened_at >= NOW() - INTERVAL '30 minutes'
+          r.opened_at >= NOW() - INTERVAL '2 hours'
           AND p.message_id IS NULL
         )
       )
