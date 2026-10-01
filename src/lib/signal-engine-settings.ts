@@ -16,7 +16,8 @@ export type SignalPresetName =
   | "aggressive"
   | "balanced"
   | "strict"
-  | "ultra";
+  | "ultra"
+  | "moonshot";
 
 export type SignalEngineSettings =
   Required<SignalSettings> & {
@@ -105,6 +106,24 @@ export const SIGNAL_PRESETS: Record<
     minMomentum1h: -12,
     maxMomentum1h: 200,
     minLiquidityValuationRatio: 0.035,
+    confirmationScans: 1,
+  }),
+  moonshot: profile({
+    minSignalScore: 40,
+    minLiquidityUsd: 5_000,
+    minPairAgeMinutes: 1,
+    maxPairAgeHours: 24,
+    minVolume5mUsd: 1_000,
+    minTransactions5m: 5,
+    minBuyShare: 0.50,
+    maxBuyShare: 0.98,
+    minVolumeSpike: 0.80,
+    maxVolumeSpike: 8.00,
+    minMomentum5m: -0.5,
+    maxMomentum5m: 40,
+    minMomentum1h: -25,
+    maxMomentum1h: 350,
+    minLiquidityValuationRatio: 0.01,
     confirmationScans: 1,
   }),
 };
