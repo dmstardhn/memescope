@@ -189,14 +189,7 @@ export async function ensureFreeButtonsSchema() {
     const count = Number((rows[0] as DbRow | undefined)?.count ?? 0);
     if (count === 0) {
       await sql`
-        INSERT INTO memescope_free_buttons (
-          label, url, enabled, sort_order
-        ) VALUES (
-          ${"🔒 JOIN MEMESCOPE VIP"},
-          ${defaultVipUrl()},
-          TRUE,
-          1
-        )
+        SELECT 1
       `;
     }
   })().catch((error) => {
@@ -249,27 +242,9 @@ function rowsOfTwo(buttons: TelegramButton[]) {
 
 export async function getFreeChannelPostKeyboard():
   Promise<TelegramKeyboard | undefined> {
-  try {
-    const buttons = (await getFreeButtons(true)).filter(
-      (button) => !button.label.toLowerCase().includes("vip"),
-    );
-    if (buttons.length === 0) return undefined;
-
-    return {
-      inline_keyboard: rowsOfTwo(
-        buttons.map((button) => ({
-          text: button.label,
-          url: button.url,
-        })),
-      ),
-    };
-  } catch (error) {
-    console.error(
-      "MemeScope FREE button DB failed; sending post without buttons:",
-      error,
-    );
-      return undefined;
-  }
+  // FREE channel intentionally has no inline buttons.
+  // VIP upsell/button has been retired.
+  return undefined;
 }
 
 function listText(buttons: FreeButton[]) {
