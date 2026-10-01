@@ -7,8 +7,10 @@ import {
   telegramConfig,
   telegramConfigured,
   telegramSendMessage,
+  telegramSendPhotoUpload,
   telegramSiteUrl,
 } from "@/lib/telegram";
+import { renderSignalResultCard } from "@/lib/signal-result-card";
 import type { SignalCall } from "@/lib/signal-types";
 import type { TerminalToken } from "@/lib/terminal-types";
 
@@ -1007,43 +1009,42 @@ function performanceTelegramText(
   call: CallStory,
   stage: number,
 ) {
+  const peak =
+    call.peakMultiple ??
+    call.currentMultiple ??
+    1;
+  const gain =
+    Math.max(
+      0,
+      (peak - 1) * 100,
+    );
   const peakMc =
     call.peakMarketCapUsd ??
     call.currentMarketCapUsd;
 
   return [
-    `<b>${performanceTitle(
-      stage,
-    )}</b>`,
-    "",
-    `<b>$${escapeTelegramHtml(
+    `<b>\u{1F680} $${escapeTelegramHtml(
       call.symbol,
-    )} • ${performanceLabel(
-      call,
-    )}</b>`,
-    `<code>${escapeTelegramHtml(
-      call.publicId,
-    )}</code>`,
+    )} \u{1F4B0} +${gain.toFixed(
+      gain >= 100 ? 0 : 1,
+    )}% SINCE MEMESCOPE CALL</b>`,
     "",
-    "╭─ <b>CALL PERFORMANCE</b>",
-    `├ 💰 Entry MC <b>${compactUsd(
+    `\u{1F4CA} Call MC: <b>${compactUsd(
       call.callMarketCapUsd,
-    )}</b>`,
-    `├ 🚀 Peak MC <b>${compactUsd(
+    )}</b> \u2192 Peak MC: <b>${compactUsd(
       peakMc,
     )}</b>`,
-    `├ 📈 From Call <b>${performanceLabel(
-      call,
-    )}</b>`,
-    `╰ 🟢 Status <b>${performanceStatus(
+    `\u{1F4C8} Peak: <b>${multipleText(
+      peak,
+    )}</b> \u00B7 Status: <b>${performanceStatus(
       stage,
     )}</b>`,
     "",
-    stage >= 3
-      ? "🔥 New post-call high detected."
-      : "⚡ Momentum is developing after the original call.",
+    `CA: <code>${escapeTelegramHtml(
+      call.tokenAddress,
+    )}</code>`,
     "",
-    "<b>MemeScope</b>",
+    "<i>Tracked from the original timestamped MemeScope call.</i>",
   ].join("\n");
 }
 
@@ -1115,21 +1116,67 @@ async function publishPendingPublicMilestones() {
       continue;
     }
 
-    const message =
-      await telegramSendMessage(
-        channelId,
-        performanceTelegramText(
-          call,
-          stage,
-        ),
-        {
-          replyMarkup:
-            milestoneButtons(
-              call,
-              originalMessageIdValue,
-            ),
-        },
+    const caption =
+      performanceTelegramText(
+        call,
+        stage,
       );
+    const replyMarkup =
+      milestoneButtons(
+        call,
+        originalMessageIdValue,
+      );
+    const peakMc =
+      call.peakMarketCapUsd ??
+      call.currentMarketCapUsd;
+
+    let message;
+
+    try {
+      const card =
+        await renderSignalResultCard(
+          {
+            symbol:
+              call.symbol,
+            callMarketCapUsd:
+              call.callMarketCapUsd,
+            peakMarketCapUsd:
+              peakMc,
+            peakMultiple:
+              call.peakMultiple,
+            calledAt:
+              call.calledAt,
+            tokenAddress:
+              call.tokenAddress,
+            publicId:
+              call.publicId,
+          },
+        );
+
+      message =
+        await telegramSendPhotoUpload(
+          channelId,
+          card,
+          {
+            caption,
+            replyMarkup,
+          },
+        );
+    } catch (cardError) {
+      console.error(
+        "MemeScope VIP result card failed; using text fallback:",
+        cardError,
+      );
+
+      message =
+        await telegramSendMessage(
+          channelId,
+          caption,
+          {
+            replyMarkup,
+          },
+        );
+    }
 
     const legacyMilestone =
       threshold >= 10

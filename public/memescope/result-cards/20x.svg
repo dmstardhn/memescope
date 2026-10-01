@@ -1,0 +1,33 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#030605"/>
+    <stop offset="60%" stop-color="#080C0A"/>
+    <stop offset="100%" stop-color="#020403"/>
+  </linearGradient>
+  <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#D8B4FE"/>
+    <stop offset="100%" stop-color="#8B5CF6"/>
+  </linearGradient>
+  <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
+    <path d="M52 0H0V52" fill="none" stroke="#153126" stroke-width="1" opacity=".28"/>
+  </pattern>
+  <filter id="blur"><feGaussianBlur stdDeviation="20"/></filter>
+</defs>
+<rect width="1600" height="900" fill="url(#bg)"/>
+<rect width="1600" height="900" fill="url(#grid)" opacity=".42"/>
+<ellipse cx="285" cy="445" rx="310" ry="310" fill="#D8B4FE" opacity=".035" filter="url(#blur)"/>
+<rect x="30" y="30" width="1540" height="840" rx="30" fill="none" stroke="#8B5CF6" stroke-width="2" opacity=".28"/>
+<rect x="56" y="56" width="1488" height="788" rx="23" fill="none" stroke="#25352F" stroke-width="1"/>
+<rect x="615" y="74" width="870" height="86" rx="17" fill="#170C25" stroke="#8B5CF6" stroke-width="2" opacity=".96"/>
+<rect x="615" y="760" width="870" height="74" rx="17" fill="#07100D" stroke="#20352C"/>
+<rect x="82" y="710" width="455" height="124" rx="20" fill="#07100D" stroke="#20352C"/>
+<path d="M616 183 H1483" stroke="url(#bar)" stroke-width="3" opacity=".55"/>
+<path d="M616 735 H1483" stroke="url(#bar)" stroke-width="2" opacity=".35"/>
+
+          <path d="M320 160 L555 295 L555 565 L320 700 L85 565 L85 295 Z" fill="none" stroke="#D8B4FE" stroke-width="4" opacity=".14"/>
+          <path d="M320 230 L495 330 L495 530 L320 630 L145 530 L145 330 Z" fill="none" stroke="#8B5CF6" stroke-width="2" opacity=".20"/>
+          <path d="M145 330 L495 530 M495 330 L145 530" stroke="#D8B4FE" stroke-width="2" opacity=".08"/>
+        
+<text x="108" y="114" font-family="Arial,Helvetica,sans-serif" font-size="21" font-weight="700" letter-spacing="6" fill="#D8B4FE" opacity=".85">MEMESCOPE / LEGEND</text>
+</svg>

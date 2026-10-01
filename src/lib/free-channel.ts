@@ -1,5 +1,6 @@
 import "server-only";
 import { getFreeChannelPostKeyboard } from "@/lib/free-buttons";
+import { renderSignalResultCard } from "@/lib/signal-result-card";
 
 import { createHash } from "node:crypto";
 
@@ -241,6 +242,77 @@ async function freeChannelSendPhotoMessage(
   }
 }
 
+async function freeChannelSendResultCardMessage(
+  chatId: Parameters<typeof telegramSendPhotoUpload>[0],
+  photo: Blob,
+  caption: string,
+  options?: Omit<
+    NonNullable<Parameters<typeof telegramSendPhoto>[2]>,
+    "caption"
+  >,
+) {
+  const customKeyboard =
+    await getFreeChannelPostKeyboard();
+
+  const existingReplyMarkup =
+    options?.replyMarkup as
+      | {
+          inline_keyboard?: Array<
+            Array<{
+              text: string;
+              url?: string;
+              callback_data?: string;
+            }>
+          >;
+        }
+      | undefined;
+
+  const systemRows =
+    Array.isArray(
+      existingReplyMarkup
+        ?.inline_keyboard,
+    )
+      ? existingReplyMarkup
+          .inline_keyboard
+      : [];
+
+  const customRows =
+    Array.isArray(
+      customKeyboard
+        ?.inline_keyboard,
+    )
+      ? customKeyboard
+          .inline_keyboard
+      : [];
+
+  const mergedKeyboard =
+    systemRows.length > 0 ||
+    customRows.length > 0
+      ? {
+          inline_keyboard: [
+            ...systemRows,
+            ...customRows,
+          ],
+        }
+      : undefined;
+
+  return telegramSendPhotoUpload(
+    chatId,
+    photo,
+    {
+      ...(options ?? {}),
+      caption,
+      ...(mergedKeyboard
+        ? {
+            replyMarkup:
+              mergedKeyboard,
+          }
+        : {}),
+    },
+  );
+}
+
+
 type DbRow = Record<string, unknown>;
 
 type PaidSourceKind =
@@ -276,6 +348,7 @@ type VipResultRow = {
   tokenAddress: string;
   symbol: string;
   name: string;
+  calledAt: number;
   callMarketCapUsd: number | null;
   peakMarketCapUsd: number | null;
   peakMultiple: number;
@@ -1306,22 +1379,34 @@ function vipResultTitle(milestone: number) {
 }
 
 function vipResultText(call: VipResultRow) {
+  const gain =
+    Math.max(
+      0,
+      (call.peakMultiple - 1) *
+        100,
+    );
+
   return [
-    `<b>${vipResultTitle(highestFreeResultMilestone(call.peakMultiple))}</b>`,
+    `<b>\u{1F680} $${escapeTelegramHtml(
+      call.symbol,
+    )} \u{1F4B0} +${gain.toFixed(
+      gain >= 100 ? 0 : 1,
+    )}% AFTER VIP CALL</b>`,
     "",
-    `<b>$${escapeTelegramHtml(call.symbol)} • ${multipleText(call.peakMultiple)} FROM VIP CALL</b>`,
+    `\u{1F4CA} Call MC: <b>${compactUsd(
+      call.callMarketCapUsd,
+    )}</b> \u2192 Peak MC: <b>${compactUsd(
+      call.peakMarketCapUsd,
+    )}</b>`,
+    `\u{1F4C8} Peak: <b>${multipleText(
+      call.peakMultiple,
+    )}</b>`,
     "",
-    "╭─ <b>TRACKED PERFORMANCE</b>",
-    `├ 🎯 VIP Call MC <b>${compactUsd(call.callMarketCapUsd)}</b>`,
-    `├ 🚀 Peak MC <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
-    `├ 📈 Peak Multiple <b>${multipleText(call.peakMultiple)}</b>`,
-    "╰ ✅ Tracked from the original VIP call",
+    `CA: <code>${escapeTelegramHtml(
+      call.tokenAddress,
+    )}</code>`,
     "",
-    "This result comes from a timestamped MemeScope VIP call. The original live entry is not being republished here.",
-    "",
-    "🔒 <b>VIP sees the call. Public sees selected results.</b>",
-    "",
-    "<b>MemeScope</b>",
+    "<i>Selected tracked result. VIP receives MemeScope calls first.</i>",
   ].join("\n");
 }
 
@@ -1573,6 +1658,7 @@ async function currentVipResults(): Promise<VipResultRow[]> {
       c.token_address,
       c.symbol,
       c.name,
+      c.called_at,
       c.call_market_cap_usd,
       c.peak_market_cap_usd,
       c.peak_multiple
@@ -1599,6 +1685,7 @@ async function currentVipResults(): Promise<VipResultRow[]> {
         tokenAddress: String(row.token_address),
         symbol: String(row.symbol),
         name: String(row.name),
+        calledAt: Date.parse(String(row.called_at)),
         callMarketCapUsd: numOrNull(row.call_market_cap_usd),
         peakMarketCapUsd: numOrNull(row.peak_market_cap_usd),
         peakMultiple,
@@ -1911,39 +1998,79 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
     if (!reserved[0]) continue;
 
     try {
-      const mediaUrl =
-        await resolveFreeTokenMedia(
-          call.tokenAddress,
-          markets.get(
-            call.tokenAddress,
-          ),
-        );
       const text =
         vipResultText(call);
+      const replyMarkup =
+        freeButtons(null);
 
-      const message =
-        mediaUrl
-          ? await freeChannelSendPhotoMessage(
-              config.freeChannelId,
-              mediaUrl,
-              text,
-              {
-                replyMarkup:
-                  freeButtons(
-                    null,
-                  ),
-              },
-            )
-          : await freeChannelSendMessage(
-              config.freeChannelId,
-              text,
-              {
-                replyMarkup:
-                  freeButtons(
-                    null,
-                  ),
-              },
-            );
+      let message;
+
+      try {
+        const card =
+          await renderSignalResultCard(
+            {
+              symbol:
+                call.symbol,
+              callMarketCapUsd:
+                call.callMarketCapUsd,
+              peakMarketCapUsd:
+                call.peakMarketCapUsd,
+              peakMultiple:
+                call.peakMultiple,
+              calledAt:
+                Number.isFinite(
+                  call.calledAt,
+                )
+                  ? call.calledAt
+                  : Date.now(),
+              tokenAddress:
+                call.tokenAddress,
+              publicId:
+                call.publicId,
+            },
+          );
+
+        message =
+          await freeChannelSendResultCardMessage(
+            config.freeChannelId,
+            card,
+            text,
+            {
+              replyMarkup,
+            },
+          );
+      } catch (cardError) {
+        console.error(
+          "MemeScope FREE result card failed; using token-media fallback:",
+          cardError,
+        );
+
+        const mediaUrl =
+          await resolveFreeTokenMedia(
+            call.tokenAddress,
+            markets.get(
+              call.tokenAddress,
+            ),
+          );
+
+        message =
+          mediaUrl
+            ? await freeChannelSendPhotoMessage(
+                config.freeChannelId,
+                mediaUrl,
+                text,
+                {
+                  replyMarkup,
+                },
+              )
+            : await freeChannelSendMessage(
+                config.freeChannelId,
+                text,
+                {
+                  replyMarkup,
+                },
+              );
+      }
 
       await sql`
         UPDATE memescope_free_posts
@@ -2057,6 +2184,7 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
       tokenAddress: "TEST_FREE_CHANNEL",
       symbol: "MSCOPE",
       name: "MemeScope Test",
+      calledAt: Date.now() - 2 * 60 * 60 * 1000,
       callMarketCapUsd: 84_000,
       peakMarketCapUsd: 287_000,
       peakMultiple: 3.42,
