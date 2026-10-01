@@ -854,7 +854,11 @@ export async function publishPendingTelegramSignals() {
     return {
       configured: false,
       initialized: false,
+      attempted: 0,
       sent: 0,
+      failed: 0,
+      mediaFallbacks: 0,
+      lastError: null,
       edited: 0,
       targetReplies: 0,
     };
@@ -871,7 +875,11 @@ export async function publishPendingTelegramSignals() {
       initialized: true,
       baselineCount:
         baseline.baselineCount,
+      attempted: 0,
       sent: 0,
+      failed: 0,
+      mediaFallbacks: 0,
+      lastError: null,
       edited: 0,
       targetReplies: 0,
     };
@@ -898,7 +906,11 @@ export async function publishPendingTelegramSignals() {
       LIMIT 150
     `;
 
+  let attempted = 0;
   let sent = 0;
+  let failed = 0;
+  let mediaFallbacks = 0;
+  let lastError: string | null = null;
 
   for (const raw of rows) {
     const row =
@@ -913,27 +925,56 @@ export async function publishPendingTelegramSignals() {
       );
 
     if (messageId === null) {
-      const text =
-        await channelText(record);
-      const photoUrl =
-        await resolveSignalPhotoUrl(
-          record.tokenAddress,
-        );
+      attempted += 1;
 
-      const message =
-        photoUrl
-          ? await telegramSendPhoto(
-              channelId,
-              photoUrl,
-              {
-                caption: text,
-                replyMarkup:
-                  signalButtons(
-                    record,
-                  ),
-              },
-            )
-          : await telegramSendMessage(
+      try {
+        const text =
+          await channelText(record);
+        const photoUrl =
+          await resolveSignalPhotoUrl(
+            record.tokenAddress,
+          );
+
+        let message;
+
+        if (photoUrl) {
+          try {
+            message =
+              await telegramSendPhoto(
+                channelId,
+                photoUrl,
+                {
+                  caption: text,
+                  replyMarkup:
+                    signalButtons(
+                      record,
+                    ),
+                },
+              );
+          } catch (mediaError) {
+            mediaFallbacks += 1;
+            console.error(
+              "MemeScope VIP media send failed; falling back to text for " +
+                record.tokenAddress +
+                ":",
+              mediaError,
+            );
+
+            message =
+              await telegramSendMessage(
+                channelId,
+                text,
+                {
+                  replyMarkup:
+                    signalButtons(
+                      record,
+                    ),
+                },
+              );
+          }
+        } else {
+          message =
+            await telegramSendMessage(
               channelId,
               text,
               {
@@ -943,52 +984,68 @@ export async function publishPendingTelegramSignals() {
                   ),
               },
             );
+        }
 
-      await sql`
-        INSERT INTO memescope_telegram_posts (
-          signal_record_id,
-          signal_id,
-          channel_id,
-          message_id,
-          baseline,
-          first_sent_at,
-          last_edited_at,
-          last_status,
-          last_current_gain_pct,
-          last_peak_gain_pct,
-          last_drawdown_pct
-        )
-        VALUES (
-          ${record.id},
-          ${record.signalId},
-          ${channelId},
-          ${message.message_id},
-          FALSE,
-          NOW(),
-          NULL,
-          ${record.status},
-          ${record.currentGainPercent},
-          ${record.peakGainPercent},
-          ${record.maxDrawdownPercent}
-        )
-        ON CONFLICT (signal_record_id)
-        DO UPDATE SET
-          message_id = COALESCE(
-            memescope_telegram_posts.message_id,
-            EXCLUDED.message_id
-          ),
-          channel_id = EXCLUDED.channel_id,
-          first_sent_at = COALESCE(
-            memescope_telegram_posts.first_sent_at,
-            NOW()
-          ),
-          last_status = EXCLUDED.last_status,
-          last_current_gain_pct = EXCLUDED.last_current_gain_pct,
-          last_peak_gain_pct = EXCLUDED.last_peak_gain_pct,
-          last_drawdown_pct = EXCLUDED.last_drawdown_pct
-      `;
+        await sql`
+          INSERT INTO memescope_telegram_posts (
+            signal_record_id,
+            signal_id,
+            channel_id,
+            message_id,
+            baseline,
+            first_sent_at,
+            last_edited_at,
+            last_status,
+            last_current_gain_pct,
+            last_peak_gain_pct,
+            last_drawdown_pct
+          )
+          VALUES (
+            ${record.id},
+            ${record.signalId},
+            ${channelId},
+            ${message.message_id},
+            FALSE,
+            NOW(),
+            NULL,
+            ${record.status},
+            ${record.currentGainPercent},
+            ${record.peakGainPercent},
+            ${record.maxDrawdownPercent}
+          )
+          ON CONFLICT (signal_record_id)
+          DO UPDATE SET
+            message_id = COALESCE(
+              memescope_telegram_posts.message_id,
+              EXCLUDED.message_id
+            ),
+            channel_id = EXCLUDED.channel_id,
+            first_sent_at = COALESCE(
+              memescope_telegram_posts.first_sent_at,
+              NOW()
+            ),
+            last_status = EXCLUDED.last_status,
+            last_current_gain_pct = EXCLUDED.last_current_gain_pct,
+            last_peak_gain_pct = EXCLUDED.last_peak_gain_pct,
+            last_drawdown_pct = EXCLUDED.last_drawdown_pct
+        `;
 
-      sent += 1;
+        sent += 1;
+      } catch (error) {
+        failed += 1;
+        lastError =
+          error instanceof Error
+            ? error.message
+            : "Unknown Telegram publisher error.";
+
+        console.error(
+          "MemeScope VIP signal publish failed for " +
+            record.tokenAddress +
+            ":",
+          error,
+        );
+      }
+
       continue;
     }
 
@@ -1006,10 +1063,12 @@ export async function publishPendingTelegramSignals() {
   return {
     configured: true,
     initialized: false,
+    attempted,
     sent,
+    failed,
+    mediaFallbacks,
+    lastError,
     edited: 0,
     targetReplies: 0,
   };
 }
-
-

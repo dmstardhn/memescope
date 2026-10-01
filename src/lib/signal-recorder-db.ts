@@ -975,6 +975,15 @@ export async function recordSignalSnapshot(
 
   // Stage 17 Telegram publisher.
   // Telegram failures must never break the signal recorder itself.
+  let telegramPublisher: Record<string, unknown> = {
+    ok: false,
+    attempted: 0,
+    sent: 0,
+    failed: 0,
+    mediaFallbacks: 0,
+    lastError: null,
+  };
+
   try {
     const {
       publishPendingTelegramSignals,
@@ -983,8 +992,28 @@ export async function recordSignalSnapshot(
         "@/lib/telegram-publisher"
       );
 
-    await publishPendingTelegramSignals();
+    const result =
+      await publishPendingTelegramSignals();
+
+    telegramPublisher = {
+      ok: true,
+      ...result,
+    };
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown Telegram publisher error.";
+
+    telegramPublisher = {
+      ok: false,
+      attempted: 0,
+      sent: 0,
+      failed: 1,
+      mediaFallbacks: 0,
+      lastError: message,
+    };
+
     console.error(
       "Telegram signal publisher failed:",
       error,
@@ -1001,6 +1030,7 @@ export async function recordSignalSnapshot(
     blockedByCooldown,
     rekeyedActive,
     deduped,
+    telegramPublisher,
     reentryCooldownMinutes:
       SIGNAL_REENTRY_COOLDOWN_MS /
       60_000,
