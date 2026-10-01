@@ -151,6 +151,12 @@ function presetTitle(
     return "ULTRA";
   }
 
+  if (
+    preset === "moonshot"
+  ) {
+    return "MOONSHOT";
+  }
+
   return "CUSTOM";
 }
 
@@ -181,8 +187,11 @@ function presetText(
     "🔥 <b>AGGRESSIVE</b> - earlier and more frequent",
     "Score >= 62 | Liq >= $25K | Vol 5m >= $7K | Momentum >= +1.0% | Confirm 1",
     "",
-    "⚡ <b>ULTRA</b> - most sensitive early-move preset",
+    "⚡ <b>ULTRA</b> - sensitive early-move preset",
     "Score >= 52 | Liq >= $15K | Vol 5m >= $4K | Momentum >= +0.4% | Confirm 1",
+    "",
+    "🚀 <b>MOONSHOT</b> - maximum early-discovery sensitivity",
+    "Score >= 40 | Liq >= $5K | Vol 5m >= $1K | Txns >= 5 | Confirm 1",
     "",
     "<b>Current values</b>",
     `Score >= ${settings.minSignalScore}`,
@@ -218,7 +227,7 @@ function presetText(
         : "s"
     }`,
     "",
-    "<i>ULTRA relaxes soft gates but still rejects invalid/stale market structures and limited-confidence data.</i>",
+    "<i>MOONSHOT is intentionally noisy: it increases early calls and false positives. It does not predict or guarantee 10X/100X outcomes.</i>",
   ].join("\n");
 }
 
@@ -279,6 +288,17 @@ function presetKeyboard(
             ),
           callback_data:
             "preset:ultra",
+        },
+      ],
+      [
+        {
+          text:
+            label(
+              "moonshot",
+              "🚀 Moonshot",
+            ),
+          callback_data:
+            "preset:moonshot",
         },
       ],
       [
@@ -730,7 +750,9 @@ async function handleCallback(
     rawPreset ===
       "strict" ||
     rawPreset ===
-      "ultra";
+      "ultra" ||
+    rawPreset ===
+      "moonshot";
 
   if (!valid) {
     await telegramAnswerCallbackQuery(
