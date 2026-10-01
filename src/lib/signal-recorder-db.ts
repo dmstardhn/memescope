@@ -44,6 +44,13 @@ export type StoredSignalRecord = {
 
 let schemaPromise: Promise<void> | null = null;
 
+// A token must leave the qualifying set and re-enter before another call can
+// be opened. If it re-enters too quickly, it is kept armed until this cooldown
+// expires. This prevents one noisy token from being called every minute while
+// still allowing a genuinely fresh setup later.
+const SIGNAL_REENTRY_COOLDOWN_MS =
+  30 * 60 * 1000;
+
 function databaseUrl() {
   return process.env.DATABASE_URL ?? "";
 }
@@ -228,6 +235,32 @@ export async function ensureSignalRecorderSchema() {
     await sql`
       ALTER TABLE memescope_signal_state
       ADD COLUMN IF NOT EXISTS confirmation_count INTEGER NOT NULL DEFAULT 0
+    `;
+
+    // MEMESCOPE_SIGNAL_LIFECYCLE_V2
+    // One-time state migration. Existing state rows may have been left
+    // visible/unarmed by the old lifecycle while their call record stayed
+    // active forever. Reset those rows once so a genuinely qualifying setup
+    // can enter the new re-entry lifecycle.
+    await sql`
+      ALTER TABLE memescope_signal_state
+      ADD COLUMN IF NOT EXISTS lifecycle_version INTEGER NOT NULL DEFAULT 1
+    `;
+
+    await sql`
+      ALTER TABLE memescope_signal_state
+      ALTER COLUMN lifecycle_version SET DEFAULT 2
+    `;
+
+    await sql`
+      UPDATE memescope_signal_state
+      SET
+        visible = FALSE,
+        armed = TRUE,
+        confirmation_count = 0,
+        lifecycle_version = 2,
+        updated_at = NOW()
+      WHERE lifecycle_version < 2
     `;
   })().catch((error) => {
     schemaPromise = null;
@@ -459,7 +492,26 @@ export async function recordSignalSnapshot(
       ),
     );
 
-  const activeIds = new Set(activeRecords.map((record) => record.signalId));
+  // Re-entry cooldown is token-based rather than signal-id-based. This also
+  // protects against the same mint receiving a slightly different engine ID.
+  const recentCallRows = await sql`
+    SELECT
+      token_address,
+      MAX(opened_at) AS last_opened_at
+    FROM memescope_signal_records
+    WHERE opened_at >= NOW() - INTERVAL '1 day'
+    GROUP BY token_address
+  `;
+
+  const lastOpenedByToken = new Map(
+    recentCallRows.map((raw) => {
+      const row = raw as DbRow;
+      return [
+        String(row.token_address),
+        toMillis(row.last_opened_at),
+      ] as [string, number];
+    }),
+  );
 
   let updated = 0;
   let closed = 0;
@@ -615,6 +667,10 @@ export async function recordSignalSnapshot(
   }
 
   let opened = 0;
+  let blockedByState = 0;
+  let blockedByCooldown = 0;
+  let rekeyedActive = 0;
+  let deduped = 0;
 
   // Stage 19.2: preset-driven consecutive confirmation.
   // A more aggressive preset can open on the first qualifying scan,
@@ -725,7 +781,93 @@ export async function recordSignalSnapshot(
       `;
     }
 
-    if (activeIds.has(signal.id) || !mayOpen) continue;
+    if (!mayOpen) {
+      blockedByState += 1;
+      continue;
+    }
+
+    const nowMs = Date.now();
+    const lastOpenedAt =
+      lastOpenedByToken.get(
+        signal.tokenAddress,
+      );
+
+    if (
+      lastOpenedAt !== undefined &&
+      nowMs - lastOpenedAt <
+        SIGNAL_REENTRY_COOLDOWN_MS
+    ) {
+      blockedByCooldown += 1;
+
+      // The setup did leave and re-enter, but it is still inside the
+      // anti-spam window. Keep it armed so the recorder retries on a later
+      // scan instead of requiring another disappearance.
+      state.armed = true;
+      confirmationCounts.set(
+        signal.id,
+        0,
+      );
+
+      await sql`
+        UPDATE memescope_signal_state
+        SET
+          armed = TRUE,
+          confirmation_count = 0,
+          updated_at = NOW()
+        WHERE signal_id = ${signal.id}
+      `;
+
+      continue;
+    }
+
+    // Legacy lifecycle kept a single canonical signal_id active forever.
+    // When a fresh setup is allowed after cooldown, detach only OLD active
+    // rows from the canonical engine id. Their record id, entry, gain/peak,
+    // Telegram post and Call Story remain untouched and continue tracking.
+    const reentryCutoff =
+      new Date(
+        nowMs -
+          SIGNAL_REENTRY_COOLDOWN_MS,
+      ).toISOString();
+
+    const previousActiveRows =
+      await sql`
+        SELECT id
+        FROM memescope_signal_records
+        WHERE signal_id = ${signal.id}
+          AND status = 'active'
+          AND opened_at <= ${reentryCutoff}
+      `;
+
+    for (const raw of previousActiveRows) {
+      const previousId =
+        String(
+          (raw as DbRow).id ??
+            "",
+        );
+
+      if (!previousId) {
+        continue;
+      }
+
+      const historicalSignalId =
+        `${signal.id}::prior::${previousId}`;
+
+      const moved = await sql`
+        UPDATE memescope_signal_records
+        SET
+          signal_id = ${historicalSignalId},
+          signal_visible = FALSE,
+          last_updated_at = NOW()
+        WHERE id = ${previousId}
+          AND signal_id = ${signal.id}
+          AND status = 'active'
+          AND opened_at <= ${reentryCutoff}
+        RETURNING id
+      `;
+
+      rekeyedActive += moved.length;
+    }
 
     const token = tokenMap.get(signal.tokenAddress);
     const entry = token?.priceUsd ?? signal.priceUsd;
@@ -735,7 +877,7 @@ export async function recordSignalSnapshot(
     const plan = buildSignalExitPlan(signal, settings);
     const id = randomUUID();
 
-    await sql`
+    const insertedRows = await sql`
       INSERT INTO memescope_signal_records (
         id,
         signal_id,
@@ -795,10 +937,20 @@ export async function recordSignalSnapshot(
         0
       )
       ON CONFLICT DO NOTHING
+      RETURNING id
     `;
 
-    activeIds.add(signal.id);
-    opened += 1;
+    if (insertedRows.length > 0) {
+      opened += 1;
+      lastOpenedByToken.set(
+        signal.tokenAddress,
+        nowMs,
+      );
+    } else {
+      // The unique active-signal index remains in place and is our final
+      // concurrency guard if two serverless recorder runs overlap.
+      deduped += 1;
+    }
   }
 
   // Stage 20 Call Story cycle.
@@ -845,6 +997,13 @@ export async function recordSignalSnapshot(
     opened,
     updated,
     closed,
+    blockedByState,
+    blockedByCooldown,
+    rekeyedActive,
+    deduped,
+    reentryCooldownMinutes:
+      SIGNAL_REENTRY_COOLDOWN_MS /
+      60_000,
     settings,
   };
 }
