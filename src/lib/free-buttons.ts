@@ -250,7 +250,9 @@ function rowsOfTwo(buttons: TelegramButton[]) {
 export async function getFreeChannelPostKeyboard():
   Promise<TelegramKeyboard | undefined> {
   try {
-    const buttons = await getFreeButtons(true);
+    const buttons = (await getFreeButtons(true)).filter(
+      (button) => !button.label.toLowerCase().includes("vip"),
+    );
     if (buttons.length === 0) return undefined;
 
     return {
@@ -263,18 +265,10 @@ export async function getFreeChannelPostKeyboard():
     };
   } catch (error) {
     console.error(
-      "MemeScope FREE button DB failed; using VIP fallback:",
+      "MemeScope FREE button DB failed; sending post without buttons:",
       error,
     );
-
-    const url = defaultVipUrl();
-    if (!url) return undefined;
-
-    return {
-      inline_keyboard: [
-        [{ text: "🔒 JOIN MEMESCOPE VIP", url }],
-      ],
-    };
+      return undefined;
   }
 }
 
