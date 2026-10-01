@@ -1264,7 +1264,7 @@ function paidAlertText(
   _candidates: PaidCandidate[],
 ) {
   return [
-    "📢 <b>DEX PAID ALERT</b>",
+    "\u{1F4E2} <b>DEX PAID ALERT</b>",
     "",
     `${escapeTelegramHtml(
       market.name,
@@ -1272,13 +1272,13 @@ function paidAlertText(
       market.symbol,
     )}</b>`,
     "",
-    `├ 💰 MC <b>${compactUsd(
+    `\u251C \u{1F4B0} MC <b>${compactUsd(
       market.marketCapUsd,
     )}</b>`,
-    `├ 📊 Vol 24h <b>${compactUsd(
+    `\u251C \u{1F4CA} Vol 24h <b>${compactUsd(
       market.volume24hUsd,
     )}</b>`,
-    `└ 💧 Liq <b>${compactUsd(
+    `\u2514 \u{1F4A7} Liq <b>${compactUsd(
       market.liquidityUsd,
     )}</b>`,
     "",
@@ -1286,10 +1286,9 @@ function paidAlertText(
       market.tokenAddress,
     )}</code>`,
     "",
-    "⚠️ <i>Paid DexScreener activity detected — not a VIP signal.</i>",
+    "\u26A0\uFE0F <i>Paid DexScreener activity detected \u2014 not a VIP signal.</i>",
   ].join("\n");
 }
-
 function highestFreeResultMilestone(value: number) {
   let result = 0;
 
