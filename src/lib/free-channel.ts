@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 import { getFreeChannelPostKeyboard } from "@/lib/free-buttons";
 
 import { createHash } from "node:crypto";
@@ -113,7 +113,7 @@ async function prepareFreeChannelPhoto(
   const output =
     await sharp(input)
       .rotate()
-      .resize(1200, 675, {
+      .resize(1500, 500, {
         fit: "cover",
         position: "attention",
       })
@@ -1235,7 +1235,7 @@ function freeButtons(dexUrl: string | null) {
 
   if (dexUrl) {
     firstRow.push({
-      text: "📊 DexScreener",
+      text: "ðŸ“Š DexScreener",
       url: dexUrl,
     });
   }
@@ -1249,7 +1249,7 @@ function freeButtons(dexUrl: string | null) {
 
   rows.push([
     {
-      text: "🌐 MemeScope",
+      text: "ðŸŒ MemeScope",
       url: telegramSiteUrl(),
     },
   ]);
@@ -1264,7 +1264,7 @@ function paidAlertText(
   _candidates: PaidCandidate[],
 ) {
   return [
-    "📢 <b>DEX PAID ALERT</b>",
+    "ðŸ“¢ <b>DEX PAID ALERT</b>",
     "",
     `${escapeTelegramHtml(
       market.name,
@@ -1272,13 +1272,13 @@ function paidAlertText(
       market.symbol,
     )}</b>`,
     "",
-    `├ 💰 MC <b>${compactUsd(
+    `â”œ ðŸ’° MC <b>${compactUsd(
       market.marketCapUsd,
     )}</b>`,
-    `├ 📊 Vol 24h <b>${compactUsd(
+    `â”œ ðŸ“Š Vol 24h <b>${compactUsd(
       market.volume24hUsd,
     )}</b>`,
-    `└ 💧 Liq <b>${compactUsd(
+    `â”” ðŸ’§ Liq <b>${compactUsd(
       market.liquidityUsd,
     )}</b>`,
     "",
@@ -1286,7 +1286,7 @@ function paidAlertText(
       market.tokenAddress,
     )}</code>`,
     "",
-    "⚠️ <i>Paid DexScreener activity detected — not a VIP signal.</i>",
+    "âš ï¸ <i>Paid DexScreener activity detected â€” not a VIP signal.</i>",
   ].join("\n");
 }
 
@@ -1301,26 +1301,26 @@ function highestFreeResultMilestone(value: number) {
 }
 
 function vipResultTitle(milestone: number) {
-  if (milestone >= 20) return "💎 MEMESCOPE VIP RUNNER";
-  if (milestone >= 10) return "🏆 MEMESCOPE VIP RUNNER";
-  return "🔥 MEMESCOPE VIP RESULT";
+  if (milestone >= 20) return "ðŸ’Ž MEMESCOPE VIP RUNNER";
+  if (milestone >= 10) return "ðŸ† MEMESCOPE VIP RUNNER";
+  return "ðŸ”¥ MEMESCOPE VIP RESULT";
 }
 
 function vipResultText(call: VipResultRow) {
   return [
     `<b>${vipResultTitle(highestFreeResultMilestone(call.peakMultiple))}</b>`,
     "",
-    `<b>$${escapeTelegramHtml(call.symbol)} • ${multipleText(call.peakMultiple)} FROM VIP CALL</b>`,
+    `<b>$${escapeTelegramHtml(call.symbol)} â€¢ ${multipleText(call.peakMultiple)} FROM VIP CALL</b>`,
     "",
-    "╭─ <b>TRACKED PERFORMANCE</b>",
-    `├ 🎯 VIP Call MC <b>${compactUsd(call.callMarketCapUsd)}</b>`,
-    `├ 🚀 Peak MC <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
-    `├ 📈 Peak Multiple <b>${multipleText(call.peakMultiple)}</b>`,
-    "╰ ✅ Tracked from the original VIP call",
+    "â•­â”€ <b>TRACKED PERFORMANCE</b>",
+    `â”œ ðŸŽ¯ VIP Call MC <b>${compactUsd(call.callMarketCapUsd)}</b>`,
+    `â”œ ðŸš€ Peak MC <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
+    `â”œ ðŸ“ˆ Peak Multiple <b>${multipleText(call.peakMultiple)}</b>`,
+    "â•° âœ… Tracked from the original VIP call",
     "",
     "This result comes from a timestamped MemeScope VIP call. The original live entry is not being republished here.",
     "",
-    "🔒 <b>VIP sees the call. Public sees selected results.</b>",
+    "ðŸ”’ <b>VIP sees the call. Public sees selected results.</b>",
     "",
     "<b>MemeScope</b>",
   ].join("\n");
@@ -2068,7 +2068,7 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
       [
         vipResultText(sample),
         "",
-        "⚠️ <i>Formatting test only.</i>",
+        "âš ï¸ <i>Formatting test only.</i>",
       ].join("\n"),
       {
         replyMarkup: freeButtons(null),
@@ -2102,10 +2102,11 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
     [
       paidAlertText(market, [candidate]),
       "",
-      "⚠️ <i>Formatting test only.</i>",
+      "âš ï¸ <i>Formatting test only.</i>",
     ].join("\n"),
     {
       replyMarkup: freeButtons(null),
     },
   );
 }
+
