@@ -1,3 +1,4 @@
+import { updatePerformanceBoards } from "@/lib/performance-board";
 import {
   NextResponse,
 } from "next/server";
@@ -165,6 +166,17 @@ export async function GET(
   } catch {
     // Content publishing must never break the signal/public Telegram cron.
   }
+  // MemeScope 72H performance board.
+  // Internally throttled to one update every ~5 minutes.
+  try {
+    await updatePerformanceBoards();
+  } catch (error) {
+    console.error(
+      "MemeScope performance board cycle failed:",
+      error,
+    );
+  }
+
 return NextResponse.json(
     {
       ok:
