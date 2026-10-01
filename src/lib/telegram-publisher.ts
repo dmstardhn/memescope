@@ -9,6 +9,7 @@ import {
   telegramConfig,
   telegramConfigured,
   telegramSendMessage,
+  telegramSendPhoto,
   telegramSiteUrl,
 } from "@/lib/telegram";
 import {
@@ -22,6 +23,8 @@ type DbRow = Record<
   string,
   unknown
 >;
+
+const DEX_API = "https://api.dexscreener.com";
 
 type SignalRecord = {
   id: string;
@@ -119,6 +122,195 @@ function nullableMillis(
   }
 
   return millis(value);
+}
+
+function stringOrNull(
+  value: unknown,
+) {
+  if (
+    typeof value !== "string"
+  ) {
+    return null;
+  }
+
+  const trimmed =
+    value.trim();
+
+  return trimmed || null;
+}
+
+function objectValue(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  return value as Record<
+    string,
+    unknown
+  >;
+}
+
+function objectArray(
+  value: unknown,
+) {
+  if (!Array.isArray(value)) {
+    return [] as Array<
+      Record<string, unknown>
+    >;
+  }
+
+  return value.filter(
+    (
+      item,
+    ): item is Record<
+      string,
+      unknown
+    > =>
+      typeof item === "object" &&
+      item !== null &&
+      !Array.isArray(item),
+  );
+}
+
+async function fetchPublisherJson(
+  url: string,
+): Promise<unknown> {
+  const response =
+    await fetch(url, {
+      cache: "no-store",
+      headers: {
+        accept:
+          "application/json",
+      },
+      signal: AbortSignal.timeout(
+        8_000,
+      ),
+    });
+
+  if (!response.ok) {
+    throw new Error(
+      "DEX request failed (" + response.status + ").",
+    );
+  }
+
+  return response.json();
+}
+
+async function resolveSignalPhotoUrl(
+  tokenAddress: string,
+) {
+  try {
+    const body =
+      await fetchPublisherJson(
+        DEX_API + "/tokens/v1/solana/" + encodeURIComponent(
+          tokenAddress,
+        ),
+      );
+
+    let best: {
+      rank: number;
+      liquidityUsd: number;
+      url: string;
+    } | null = null;
+
+    for (const pair of objectArray(
+      body,
+    )) {
+      const baseToken =
+        objectValue(
+          pair.baseToken,
+        );
+      const address =
+        stringOrNull(
+          baseToken?.address,
+        );
+
+      if (
+        !address ||
+        address !== tokenAddress
+      ) {
+        continue;
+      }
+
+      const info =
+        objectValue(pair.info);
+      const liquidity =
+        objectValue(
+          pair.liquidity,
+        );
+      const liquidityUsd =
+        numOrNull(
+          liquidity?.usd,
+        ) ?? 0;
+
+      const bannerUrl =
+        stringOrNull(
+          info?.header,
+        ) ??
+        stringOrNull(
+          info?.headerUrl,
+        ) ??
+        stringOrNull(
+          pair.header,
+        ) ??
+        stringOrNull(
+          pair.headerUrl,
+        );
+
+      const imageUrl =
+        stringOrNull(
+          info?.imageUrl,
+        ) ??
+        stringOrNull(
+          info?.image,
+        ) ??
+        stringOrNull(
+          pair.imageUrl,
+        ) ??
+        stringOrNull(
+          pair.image,
+        );
+
+      const selectedUrl =
+        bannerUrl ?? imageUrl;
+
+      if (!selectedUrl) {
+        continue;
+      }
+
+      const rank = bannerUrl
+        ? 2
+        : 1;
+
+      if (
+        !best ||
+        rank > best.rank ||
+        (rank === best.rank &&
+          liquidityUsd >
+            best.liquidityUsd)
+      ) {
+        best = {
+          rank,
+          liquidityUsd,
+          url: selectedUrl,
+        };
+      }
+    }
+
+    return best?.url ?? null;
+  } catch (error) {
+    console.error(
+      "MemeScope signal media lookup failed for " + tokenAddress + ":",
+      error,
+    );
+    return null;
+  }
 }
 
 function normalizeRecord(
@@ -721,17 +913,36 @@ export async function publishPendingTelegramSignals() {
       );
 
     if (messageId === null) {
-      const message =
-        await telegramSendMessage(
-          channelId,
-          await channelText(record),
-          {
-            replyMarkup:
-              signalButtons(
-                record,
-              ),
-          },
+      const text =
+        await channelText(record);
+      const photoUrl =
+        await resolveSignalPhotoUrl(
+          record.tokenAddress,
         );
+
+      const message =
+        photoUrl
+          ? await telegramSendPhoto(
+              channelId,
+              photoUrl,
+              {
+                caption: text,
+                replyMarkup:
+                  signalButtons(
+                    record,
+                  ),
+              },
+            )
+          : await telegramSendMessage(
+              channelId,
+              text,
+              {
+                replyMarkup:
+                  signalButtons(
+                    record,
+                  ),
+              },
+            );
 
       await sql`
         INSERT INTO memescope_telegram_posts (

@@ -9,6 +9,7 @@ import {
   escapeTelegramHtml,
   telegramConfig,
   telegramSendMessage,
+  telegramSendPhoto,
   telegramSiteUrl,
 } from "@/lib/telegram";
 
@@ -84,6 +85,82 @@ async function freeChannelSendMessage(
   );
 }
 
+async function freeChannelSendPhotoMessage(
+  chatId: Parameters<typeof telegramSendPhoto>[0],
+  photo: Parameters<typeof telegramSendPhoto>[1],
+  caption: string,
+  options?: Omit<
+    NonNullable<
+      Parameters<typeof telegramSendPhoto>[2]
+    >,
+    "caption"
+  >,
+) {
+  const customKeyboard =
+    await getFreeChannelPostKeyboard();
+
+  const existingReplyMarkup =
+    options?.replyMarkup as
+      | {
+          inline_keyboard?: Array<
+            Array<{
+              text: string;
+              url?: string;
+              callback_data?: string;
+            }>
+          >;
+        }
+      | undefined;
+
+  const systemRows =
+    Array.isArray(
+      existingReplyMarkup
+        ?.inline_keyboard,
+    )
+      ? existingReplyMarkup
+          .inline_keyboard
+      : [];
+
+  const customRows =
+    Array.isArray(
+      customKeyboard
+        ?.inline_keyboard,
+    )
+      ? customKeyboard
+          .inline_keyboard
+      : [];
+
+  const mergedKeyboard =
+    systemRows.length > 0 ||
+    customRows.length > 0
+      ? {
+          inline_keyboard: [
+            ...systemRows,
+            ...customRows,
+          ],
+        }
+      : undefined;
+
+  const nextOptions = {
+    ...(options ?? {}),
+    caption,
+    ...(mergedKeyboard
+      ? {
+          replyMarkup:
+            mergedKeyboard,
+        }
+      : {}),
+  } as Parameters<
+    typeof telegramSendPhoto
+  >[2];
+
+  return telegramSendPhoto(
+    chatId,
+    photo,
+    nextOptions,
+  );
+}
+
 type DbRow = Record<string, unknown>;
 
 type PaidSourceKind =
@@ -109,6 +186,8 @@ type MarketSnapshot = {
   liquidityUsd: number | null;
   volume24hUsd: number | null;
   dexUrl: string | null;
+  imageUrl: string | null;
+  bannerUrl: string | null;
 };
 
 type VipResultRow = {
@@ -913,6 +992,7 @@ async function fetchMarketSnapshots(addresses: string[]) {
 
         const liquidity = objectValue(pair.liquidity);
         const volume = objectValue(pair.volume);
+        const info = objectValue(pair.info);
         const liquidityUsd = numOrNull(liquidity?.usd);
         const previousLiquidity = liquidityByAddress.get(address) ?? -1;
         const rankingLiquidity = liquidityUsd ?? 0;
@@ -921,6 +1001,16 @@ async function fetchMarketSnapshots(addresses: string[]) {
 
         const marketCapUsd =
           numOrNull(pair.marketCap) ?? numOrNull(pair.fdv);
+        const bannerUrl =
+          stringOrNull(info?.header) ??
+          stringOrNull(info?.headerUrl) ??
+          stringOrNull(pair.header) ??
+          stringOrNull(pair.headerUrl);
+        const imageUrl =
+          stringOrNull(info?.imageUrl) ??
+          stringOrNull(info?.image) ??
+          stringOrNull(pair.imageUrl) ??
+          stringOrNull(pair.image);
 
         result.set(address, {
           tokenAddress: address,
@@ -931,7 +1021,9 @@ async function fetchMarketSnapshots(addresses: string[]) {
           volume24hUsd: numOrNull(volume?.h24),
           dexUrl:
             stringOrNull(pair.url) ??
-            `https://dexscreener.com/solana/${encodeURIComponent(address)}`,
+            "https://dexscreener.com/solana/" + encodeURIComponent(address),
+          imageUrl,
+          bannerUrl,
         });
 
         liquidityByAddress.set(address, rankingLiquidity);
@@ -942,6 +1034,19 @@ async function fetchMarketSnapshots(addresses: string[]) {
   }
 
   return result;
+}
+
+function preferredMarketMedia(
+  market:
+    | MarketSnapshot
+    | null
+    | undefined,
+) {
+  return (
+    market?.bannerUrl ??
+    market?.imageUrl ??
+    null
+  );
 }
 
 function freeButtons(dexUrl: string | null) {
@@ -1511,14 +1616,39 @@ async function publishDexPaidAlerts() {
         market.dexUrl ??
         candidates.find((candidate) => candidate.dexUrl)?.dexUrl ??
         null;
+      const mediaUrl =
+        preferredMarketMedia(
+          market,
+        );
+      const text =
+        paidAlertText(
+          market,
+          candidates,
+        );
 
-      const message = await freeChannelSendMessage(
-        config.freeChannelId,
-        paidAlertText(market, candidates),
-        {
-          replyMarkup: freeButtons(dexUrl),
-        },
-      );
+      const message =
+        mediaUrl
+          ? await freeChannelSendPhotoMessage(
+              config.freeChannelId,
+              mediaUrl,
+              text,
+              {
+                replyMarkup:
+                  freeButtons(
+                    dexUrl,
+                  ),
+              },
+            )
+          : await freeChannelSendMessage(
+              config.freeChannelId,
+              text,
+              {
+                replyMarkup:
+                  freeButtons(
+                    dexUrl,
+                  ),
+              },
+            );
 
       for (const candidate of candidates) {
         await sql`
@@ -1571,6 +1701,12 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
   const sql = sqlClient();
   const config = freeChannelConfig();
   const calls = await currentVipResults();
+  const markets =
+    await fetchMarketSnapshots(
+      calls.map(
+        (call) => call.tokenAddress,
+      ),
+    );
   let sent = 0;
 
   for (const call of calls) {
@@ -1602,13 +1738,38 @@ async function publishVipResults(minMultiple: 3 | 5 | 10 = 3) {
     if (!reserved[0]) continue;
 
     try {
-      const message = await freeChannelSendMessage(
-        config.freeChannelId,
-        vipResultText(call),
-        {
-          replyMarkup: freeButtons(null),
-        },
-      );
+      const mediaUrl =
+        preferredMarketMedia(
+          markets.get(
+            call.tokenAddress,
+          ),
+        );
+      const text =
+        vipResultText(call);
+
+      const message =
+        mediaUrl
+          ? await freeChannelSendPhotoMessage(
+              config.freeChannelId,
+              mediaUrl,
+              text,
+              {
+                replyMarkup:
+                  freeButtons(
+                    null,
+                  ),
+              },
+            )
+          : await freeChannelSendMessage(
+              config.freeChannelId,
+              text,
+              {
+                replyMarkup:
+                  freeButtons(
+                    null,
+                  ),
+              },
+            );
 
       await sql`
         UPDATE memescope_free_posts
@@ -1748,6 +1909,8 @@ export async function sendFreeChannelTest(kind: "dex" | "vip") {
     liquidityUsd: 39_600,
     volume24hUsd: 407_300,
     dexUrl: null,
+    imageUrl: null,
+    bannerUrl: null,
   };
 
   const candidate: PaidCandidate = {

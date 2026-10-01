@@ -185,6 +185,48 @@ export async function telegramSendMessage(
   );
 }
 
+export async function telegramSendPhoto(
+  chatId: string | number,
+  photo: string,
+  options?: {
+    caption?: string;
+    replyMarkup?: Record<
+      string,
+      unknown
+    >;
+    replyToMessageId?: number;
+  },
+) {
+  return telegramRequest<TelegramMessageResult>(
+    "sendPhoto",
+    {
+      chat_id: chatId,
+      photo,
+      ...(options?.caption
+        ? {
+            caption:
+              options.caption,
+            parse_mode: "HTML",
+          }
+        : {}),
+      ...(options?.replyMarkup
+        ? {
+            reply_markup:
+              options.replyMarkup,
+          }
+        : {}),
+      ...(options?.replyToMessageId
+        ? {
+            reply_parameters: {
+              message_id:
+                options.replyToMessageId,
+            },
+          }
+        : {}),
+    },
+  );
+}
+
 export async function telegramEditMessage(
   chatId: string | number,
   messageId: number,
