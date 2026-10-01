@@ -208,6 +208,44 @@ function medal(
 function normalizeRow(
   row: DbRow,
 ): BoardRow {
+  const callMarketCapUsd =
+    numOrNull(
+      row.call_market_cap_usd,
+    );
+
+  const peakMarketCapUsd =
+    numOrNull(
+      row.peak_market_cap_usd,
+    );
+
+  const storedPeakMultiple =
+    Math.max(
+      1,
+      Number(
+        row.peak_multiple ??
+          1,
+      ) || 1,
+    );
+
+  const derivedPeakMultiple =
+    callMarketCapUsd &&
+    peakMarketCapUsd &&
+    callMarketCapUsd > 0
+      ? peakMarketCapUsd /
+        callMarketCapUsd
+      : 1;
+
+  const peakMultiple =
+    Math.max(
+      1,
+      storedPeakMultiple,
+      Number.isFinite(
+        derivedPeakMultiple,
+      )
+        ? derivedPeakMultiple
+        : 1,
+    );
+
   return {
     signalRecordId:
       String(
@@ -229,22 +267,9 @@ function normalizeRow(
         row.called_at ??
           "",
       ),
-    callMarketCapUsd:
-      numOrNull(
-        row.call_market_cap_usd,
-      ),
-    peakMarketCapUsd:
-      numOrNull(
-        row.peak_market_cap_usd,
-      ),
-    peakMultiple:
-      Math.max(
-        1,
-        Number(
-          row.peak_multiple ??
-            1,
-        ) || 1,
-      ),
+    callMarketCapUsd,
+    peakMarketCapUsd,
+    peakMultiple,
   };
 }
 
@@ -378,12 +403,24 @@ async function loadBoardRows() {
 
   return {
     rows:
-      rows.map(
-        (row: unknown) =>
-          normalizeRow(
-            row as DbRow,
-          ),
-      ),
+      rows
+        .map(
+          (row: unknown) =>
+            normalizeRow(
+              row as DbRow,
+            ),
+        )
+        .sort(
+          (a, b) =>
+            b.peakMultiple -
+              a.peakMultiple ||
+            new Date(
+              b.calledAt,
+            ).getTime() -
+              new Date(
+                a.calledAt,
+              ).getTime(),
+        ),
     totalCalls:
       Number(
         (
