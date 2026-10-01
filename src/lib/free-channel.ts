@@ -13,20 +13,64 @@ import {
 } from "@/lib/telegram";
 
 // MEMESCOPE FREE BUTTON WRAPPER
+// Existing per-post system buttons (for example token-specific DexScreener links)
+// are preserved. Admin-managed custom buttons are appended underneath them.
 async function freeChannelSendMessage(
   chatId: Parameters<typeof telegramSendMessage>[0],
   text: Parameters<typeof telegramSendMessage>[1],
   options?: Parameters<typeof telegramSendMessage>[2],
 ) {
-  const keyboard =
+  const customKeyboard =
     await getFreeChannelPostKeyboard();
+
+  const existingReplyMarkup =
+    options?.replyMarkup as
+      | {
+          inline_keyboard?: Array<
+            Array<{
+              text: string;
+              url?: string;
+              callback_data?: string;
+            }>
+          >;
+        }
+      | undefined;
+
+  const systemRows =
+    Array.isArray(
+      existingReplyMarkup
+        ?.inline_keyboard,
+    )
+      ? existingReplyMarkup
+          .inline_keyboard
+      : [];
+
+  const customRows =
+    Array.isArray(
+      customKeyboard
+        ?.inline_keyboard,
+    )
+      ? customKeyboard
+          .inline_keyboard
+      : [];
+
+  const mergedKeyboard =
+    systemRows.length > 0 ||
+    customRows.length > 0
+      ? {
+          inline_keyboard: [
+            ...systemRows,
+            ...customRows,
+          ],
+        }
+      : undefined;
 
   const nextOptions = {
     ...(options ?? {}),
-    ...(keyboard
+    ...(mergedKeyboard
       ? {
           replyMarkup:
-            keyboard,
+            mergedKeyboard,
         }
       : {}),
   } as Parameters<
