@@ -1240,12 +1240,6 @@ function freeButtons(dexUrl: string | null) {
     });
   }
 
-  if (config.vipJoinUrl) {
-    firstRow.push({
-      text: "🔒 VIP",
-      url: config.vipJoinUrl,
-    });
-  }
 
   const rows: Array<Array<{ text: string; url: string }>> = [];
 

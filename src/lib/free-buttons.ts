@@ -242,9 +242,33 @@ function rowsOfTwo(buttons: TelegramButton[]) {
 
 export async function getFreeChannelPostKeyboard():
   Promise<TelegramKeyboard | undefined> {
-  // FREE channel intentionally has no inline buttons.
-  // VIP upsell/button has been retired.
-  return undefined;
+  try {
+    const buttons = await getFreeButtons(true);
+    if (buttons.length === 0) return undefined;
+
+    return {
+      inline_keyboard: rowsOfTwo(
+        buttons.map((button) => ({
+          text: button.label,
+          url: button.url,
+        })),
+      ),
+    };
+  } catch (error) {
+    console.error(
+      "MemeScope FREE button DB failed; using VIP fallback:",
+      error,
+    );
+
+    const url = defaultVipUrl();
+    if (!url) return undefined;
+
+    return {
+      inline_keyboard: [
+        [{ text: "🔒 JOIN MEMESCOPE VIP", url }],
+      ],
+    };
+  }
 }
 
 function listText(buttons: FreeButton[]) {
