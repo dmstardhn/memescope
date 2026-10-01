@@ -889,16 +889,16 @@ export async function publishPendingTelegramSignals(
 
   if (directIds.length > 0) {
     for (const recordId of directIds) {
-      const found = await sql\`
+      const found = await sql`
         SELECT
           r.*,
           p.message_id AS telegram_message_id
         FROM memescope_signal_records r
         LEFT JOIN memescope_telegram_posts p
           ON p.signal_record_id = r.id
-        WHERE r.id = \${recordId}
+        WHERE r.id = ${recordId}
         LIMIT 1
-      \`;
+      `;
 
       if (found[0]) {
         rows.push(found[0] as DbRow);
@@ -925,7 +925,7 @@ export async function publishPendingTelegramSignals(
       };
     }
 
-    rows = (await sql\`
+    rows = (await sql`
       SELECT
         r.*,
         p.message_id AS telegram_message_id
@@ -933,7 +933,7 @@ export async function publishPendingTelegramSignals(
       LEFT JOIN memescope_telegram_posts p
         ON p.signal_record_id = r.id
       WHERE (
-        r.opened_at > \${new Date(
+        r.opened_at > ${new Date(
           baseline.initializedAt,
         ).toISOString()}
         OR (
@@ -943,7 +943,7 @@ export async function publishPendingTelegramSignals(
       )
       ORDER BY r.opened_at ASC
       LIMIT 150
-    \`) as DbRow[];
+    `) as DbRow[];
   }
 
   let attempted = 0;
@@ -957,15 +957,15 @@ export async function publishPendingTelegramSignals(
     const messageId = numOrNull(raw.telegram_message_id);
 
     if (messageId !== null) {
-      await sql\`
+      await sql`
         UPDATE memescope_telegram_posts
         SET
-          last_status = \${record.status},
-          last_current_gain_pct = \${record.currentGainPercent},
-          last_peak_gain_pct = \${record.peakGainPercent},
-          last_drawdown_pct = \${record.maxDrawdownPercent}
-        WHERE signal_record_id = \${record.id}
-      \`;
+          last_status = ${record.status},
+          last_current_gain_pct = ${record.currentGainPercent},
+          last_peak_gain_pct = ${record.peakGainPercent},
+          last_drawdown_pct = ${record.maxDrawdownPercent}
+        WHERE signal_record_id = ${record.id}
+      `;
       continue;
     }
 
@@ -1014,7 +1014,7 @@ export async function publishPendingTelegramSignals(
         );
       }
 
-      await sql\`
+      await sql`
         INSERT INTO memescope_telegram_posts (
           signal_record_id,
           signal_id,
@@ -1029,17 +1029,17 @@ export async function publishPendingTelegramSignals(
           last_drawdown_pct
         )
         VALUES (
-          \${record.id},
-          \${record.signalId},
-          \${channelId},
-          \${message.message_id},
+          ${record.id},
+          ${record.signalId},
+          ${channelId},
+          ${message.message_id},
           FALSE,
           NOW(),
           NULL,
-          \${record.status},
-          \${record.currentGainPercent},
-          \${record.peakGainPercent},
-          \${record.maxDrawdownPercent}
+          ${record.status},
+          ${record.currentGainPercent},
+          ${record.peakGainPercent},
+          ${record.maxDrawdownPercent}
         )
         ON CONFLICT (signal_record_id)
         DO UPDATE SET
@@ -1057,7 +1057,7 @@ export async function publishPendingTelegramSignals(
           last_current_gain_pct = EXCLUDED.last_current_gain_pct,
           last_peak_gain_pct = EXCLUDED.last_peak_gain_pct,
           last_drawdown_pct = EXCLUDED.last_drawdown_pct
-      \`;
+      `;
 
       sent += 1;
     } catch (error) {
