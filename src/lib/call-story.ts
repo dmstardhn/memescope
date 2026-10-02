@@ -1230,7 +1230,7 @@ async function publishPendingPublicMilestones() {
             peakMarketCapUsd:
               peakMc,
              peakMultiple:
-               threshold,
+               call.peakMultiple,
             calledAt:
               call.calledAt,
             tokenAddress:
