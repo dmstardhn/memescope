@@ -1,3 +1,4 @@
+import { tryHandleContentV5AdminRequest } from "@/lib/content-hq-v5/admin";
 import { tryHandleFreeButtonsAdminRequest } from "@/lib/free-buttons";
 import {
   getFreeChannelAdminSettings,
@@ -880,6 +881,20 @@ function helpText() {
 export async function POST(
   request: Request,
 ) {
+
+  const contentV5Admin =
+    await tryHandleContentV5AdminRequest(
+      request.clone(),
+    );
+
+  if (
+    contentV5Admin.handled
+  ) {
+    return Response.json({
+      ok: true,
+    });
+  }
+
 
   const freeButtonsAdmin =
     await tryHandleFreeButtonsAdminRequest(

@@ -1394,82 +1394,23 @@ async function discoverContentOpportunities() {
 }
 
 async function publishPendingContentOpportunities() {
-  const status = await getContentHqStatus();
-  if (!status.configured || !status.chatId) return { sent: 0 };
-  const sql = sqlClient();
-  const site = telegramSiteUrl();
-  const rows = await sql`
-    SELECT *
-    FROM memescope_content_opportunities
-    WHERE status = 'pending'
-      AND sent_at IS NULL
-    ORDER BY
-      CASE priority
-        WHEN 'SPECIAL' THEN 1
-        WHEN 'FEATURED' THEN 2
-        WHEN 'HIGH' THEN 3
-        ELSE 4
-      END,
-      created_at ASC
-    LIMIT 12
-  `;
+  const {
+    publishDailyLast72Draft,
+    publishPendingContentOpportunityDrafts,
+  } = await import(
+    "@/lib/content-hq-v5/content"
+  );
 
-  let sent = 0;
-  for (const raw of rows) {
-    const row = raw as DbRow;
-    const id = num(row.id);
-    const publicId = String(row.public_id ?? "");
-    const call = publicId ? await getCallByPublicId(publicId) : null;
-    if (!call) continue;
+  const content =
+    await publishPendingContentOpportunityDrafts();
 
-    const draft = String(row.draft_text ?? "");
-    const text = [
-      "🎬 <b>MEMESCOPE CONTENT OPPORTUNITY</b>",
-      "",
-      `<b>$${escapeTelegramHtml(call.symbol)}</b> — ${escapeTelegramHtml(String(row.priority ?? "MEDIUM"))} PRIORITY`,
-      `<code>${escapeTelegramHtml(call.publicId)}</code>`,
-      "",
-      `Call MC: <b>${compactUsd(call.callMarketCapUsd)}</b>`,
-      `Peak MC: <b>${compactUsd(call.peakMarketCapUsd)}</b>`,
-      `Peak: <b>${multipleText(call.peakMultiple)}</b>`,
-      `Signal Score: <b>${Math.round(call.signalScore)}/100</b>`,
-      "",
-      "<b>Suggested X hook</b>",
-      escapeTelegramHtml(draft),
-      "",
-      "<b>Before The Move angle</b>",
-      escapeTelegramHtml(beforeMoveDraft(call)),
-      "",
-      "<i>No X post is sent automatically. This is an admin content inbox.</i>",
-    ].join("\n");
+  const last72 =
+    await publishDailyLast72Draft();
 
-    const message = await telegramSendMessage(status.chatId, text, {
-      replyMarkup: {
-        inline_keyboard: [
-          [
-            { text: "🧭 Open Call", url: `${site}/calls/${encodeURIComponent(call.publicId)}` },
-            { text: "🖼 Journey Card", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=journey` },
-          ],
-          [
-            { text: "🔎 Before The Move", url: `${site}/api/calls/${encodeURIComponent(call.publicId)}/card?mode=before` },
-          ],
-          [
-            { text: "✅ Mark Used", callback_data: `content:used:${id}` },
-            { text: "🗑 Skip", callback_data: `content:skip:${id}` },
-          ],
-        ],
-      },
-    });
-
-    await sql`
-      UPDATE memescope_content_opportunities
-      SET telegram_message_id = ${message.message_id}, sent_at = NOW(), updated_at = NOW()
-      WHERE id = ${id}
-    `;
-    sent += 1;
-  }
-
-  return { sent };
+  return {
+    ...content,
+    last72,
+  };
 }
 
 function localClock() {
