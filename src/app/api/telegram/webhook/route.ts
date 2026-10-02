@@ -1,3 +1,7 @@
+import {
+  handleXAutoPostAdminCallback,
+  sendXAutoPostAdminMenu,
+} from "@/lib/x-auto-telegram";
 import { tryHandleContentV5AdminRequest } from "@/lib/content-hq-v5/admin";
 import { tryHandleFreeButtonsAdminRequest } from "@/lib/free-buttons";
 import {
@@ -589,6 +593,71 @@ async function handleCallback(
 
   if (
     data.startsWith(
+      "xauto:",
+    )
+  ) {
+    if (
+      !chatId ||
+      !messageId
+    ) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            "X Auto Post control unavailable.",
+          showAlert:
+            true,
+        },
+      );
+
+      return;
+    }
+
+    try {
+      const result =
+        await handleXAutoPostAdminCallback({
+          action:
+            data.slice(
+              "xauto:".length,
+            ),
+          chatId,
+          messageId,
+          userId,
+        });
+
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            result.message.slice(
+              0,
+              180,
+            ),
+        },
+      );
+    }
+    catch (error) {
+      await telegramAnswerCallbackQuery(
+        callbackId,
+        {
+          text:
+            error instanceof Error
+              ? error.message.slice(
+                  0,
+                  180,
+                )
+              : "X Auto Post action failed.",
+          showAlert:
+            true,
+        },
+      );
+    }
+
+    return;
+  }
+
+  if (
+    data.startsWith(
       "hq2:",
     )
   ) {
@@ -1131,6 +1200,13 @@ const contentHqAdmin = await tryHandleContentHqAdminRequest(request.clone());
           ].join("\n"),
         );
       }
+    } else if (
+      command === "/xautopost"
+    ) {
+      await sendXAutoPostAdminMenu(
+        chatId,
+        userId,
+      );
     } else if (
       command === "/contenthq"
     ) {

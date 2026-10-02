@@ -845,12 +845,144 @@ async function markFailed(
   `;
 }
 
+
+// MEMESCOPE_X_AUTO_TELEGRAM_CONTROL_V1
+
+async function ensureXAutoControlSchema() {
+  const sql =
+    xAutoContentSqlClient();
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS
+      memescope_x_auto_config (
+        id INTEGER PRIMARY KEY,
+        enabled BOOLEAN
+          NOT NULL DEFAULT TRUE,
+        updated_at TIMESTAMPTZ
+          NOT NULL DEFAULT NOW()
+      )
+  `;
+
+  await sql`
+    INSERT INTO
+      memescope_x_auto_config (
+        id,
+        enabled,
+        updated_at
+      )
+    VALUES (
+      1,
+      TRUE,
+      NOW()
+    )
+    ON CONFLICT (id)
+    DO NOTHING
+  `;
+}
+
+function xAutoDbBoolean(
+  value: unknown,
+) {
+  return (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    value === "t" ||
+    value === "true"
+  );
+}
+
+export async function getXAutoPostEnabled() {
+  await ensureXAutoControlSchema();
+
+  const sql =
+    xAutoContentSqlClient();
+
+  const rows =
+    await sql`
+      SELECT
+        enabled
+      FROM
+        memescope_x_auto_config
+      WHERE
+        id = 1
+      LIMIT 1
+    `;
+
+  if (!rows.length) {
+    return true;
+  }
+
+  return xAutoDbBoolean(
+    rows[0].enabled,
+  );
+}
+
+export async function setXAutoPostEnabled(
+  enabled: boolean,
+) {
+  await ensureXAutoControlSchema();
+
+  const sql =
+    xAutoContentSqlClient();
+
+  const rows =
+    await sql`
+      INSERT INTO
+        memescope_x_auto_config (
+          id,
+          enabled,
+          updated_at
+        )
+      VALUES (
+        1,
+        ${enabled},
+        NOW()
+      )
+      ON CONFLICT (id)
+      DO UPDATE SET
+        enabled =
+          EXCLUDED.enabled,
+        updated_at =
+          NOW()
+      RETURNING
+        enabled
+    `;
+
+  return rows.length
+    ? xAutoDbBoolean(
+        rows[0].enabled,
+      )
+    : enabled;
+}
+
+export async function toggleXAutoPostEnabled() {
+  const current =
+    await getXAutoPostEnabled();
+
+  return setXAutoPostEnabled(
+    !current,
+  );
+}
+
 export async function runXAutoSlot(
   slot: XAutoSlot,
 ) {
   await ensureXAutoSchema();
 
-  const draft =
+    const autoPostEnabled =
+    await getXAutoPostEnabled();
+
+  if (!autoPostEnabled) {
+    return {
+      ok: true,
+      slot,
+      published: false,
+      skipped: true,
+      reason: "auto-post-disabled",
+    };
+  }
+const draft =
     await createDraft(
       slot,
     );
