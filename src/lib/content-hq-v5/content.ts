@@ -1079,3 +1079,332 @@ export async function sendLatestResultDraftPreview() {
     messageId: message.message_id,
   };
 }
+
+
+// MEMESCOPE_X_AUTO_DRAFT_BUILDERS_V1
+
+export type MemeScopeXAutoDraft = {
+  sourceKey: string;
+  text: string;
+  image?: Buffer;
+  contentType:
+    | "text"
+    | "result"
+    | "last72";
+};
+
+export function xAutoContentSqlClient() {
+  return sqlClient();
+}
+
+function xAutoPublicSymbol(
+  symbol: string,
+) {
+  const clean =
+    symbol
+      .trim()
+      .replace(
+        /^\$/,
+        "",
+      );
+
+  return `$${clean}`;
+}
+
+function xAutoJakartaVariant(
+  dateKey: string,
+) {
+  return (
+    dateKey
+      .split("")
+      .reduce(
+        (
+          sum,
+          char,
+        ) =>
+          sum +
+          char.charCodeAt(
+            0,
+          ),
+        0,
+      ) % 6
+  );
+}
+
+export async function buildXTextOnlyDraft(
+  dateKey: string,
+): Promise<MemeScopeXAutoDraft | null> {
+  const sql =
+    sqlClient();
+
+  const rows =
+    await sql`
+      SELECT
+        signal_record_id,
+        public_id,
+        symbol,
+        called_at,
+        call_market_cap_usd,
+        peak_market_cap_usd,
+        peak_multiple
+      FROM memescope_call_story
+      WHERE called_at >=
+        NOW() - INTERVAL '72 hours'
+        AND COALESCE(
+          peak_multiple,
+          1
+        ) > 1
+      ORDER BY
+        peak_multiple DESC,
+        called_at DESC
+      LIMIT 5
+    `;
+
+  if (!rows.length) {
+    return null;
+  }
+
+  const calls =
+    rows.map(
+      (row) =>
+        normalizeCall(
+          row as DbRow,
+        ),
+    );
+
+  const top =
+    calls[0];
+
+  const symbol =
+    xAutoPublicSymbol(
+      top.symbol,
+    );
+
+  const gain =
+    Math.max(
+      0,
+      (
+        top.peakMultiple -
+        1
+      ) * 100,
+    );
+
+  const total =
+    calls.length;
+
+  const variants = [
+    `Market observation:\n\n${symbol} is currently the strongest tracked move in MemeScope's rolling 72H window, reaching +${gain.toFixed(
+      0,
+    )}% from the original call.\n\nWatching the data, not chasing the candle.\n\n#MemeScope #Solana #Memecoin`,
+
+    `72H tape check.\n\n${symbol} leads the currently tracked MemeScope calls at +${gain.toFixed(
+      0,
+    )}% from call.\n\nThe move is already in the data. The next setup still has to earn its place.\n\n#MemeScope #Solana #Memecoin`,
+
+    `Current MemeScope tape:\n\n${total} tracked mover${
+      total === 1
+        ? ""
+        : "s"
+    } sit near the top of the 72H board, with ${symbol} leading at +${gain.toFixed(
+      0,
+    )}%.\n\nOriginal calls. Post-call tracking.\n\n#MemeScope #Solana`,
+
+    `One thing the market keeps rewarding: expansion after the initial discovery.\n\n${symbol} currently sits at +${gain.toFixed(
+      0,
+    )}% from its MemeScope call inside the rolling 72H window.\n\n#MemeScope #Memecoin #Solana`,
+
+    `The strongest tracked move on the current MemeScope 72H tape is ${symbol}: +${gain.toFixed(
+      0,
+    )}% from call.\n\nNo hindsight entry. Performance is measured from the original call.\n\n#MemeScope #Solana #Memecoin`,
+
+    `Morning market check:\n\n${symbol} remains the leading tracked move on the current 72H MemeScope board at +${gain.toFixed(
+      0,
+    )}% from call.\n\nNew calls still have to pass the scanner first.\n\n#MemeScope #Solana`,
+  ];
+
+  const text =
+    variants[
+      xAutoJakartaVariant(
+        dateKey,
+      )
+    ];
+
+  return {
+    sourceKey:
+      `text:${dateKey}`,
+    text,
+    contentType:
+      "text",
+  };
+}
+
+export async function buildXBestResultDraft():
+Promise<MemeScopeXAutoDraft | null> {
+  const sql =
+    sqlClient();
+
+  const rows =
+    await sql`
+      SELECT
+        c.signal_record_id,
+        c.public_id,
+        c.symbol,
+        c.called_at,
+        c.call_market_cap_usd,
+        c.peak_market_cap_usd,
+        c.peak_multiple
+      FROM memescope_call_story c
+      WHERE
+        COALESCE(
+          c.peak_multiple,
+          1
+        ) >= 3
+        AND c.public_id
+          IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM memescope_x_posts xp
+          WHERE
+            xp.source_key =
+              (
+                'result:' ||
+                c.public_id
+              )
+            AND xp.status =
+              'published'
+        )
+      ORDER BY
+        c.peak_multiple DESC,
+        c.called_at ASC
+      LIMIT 1
+    `;
+
+  if (!rows.length) {
+    return null;
+  }
+
+  const call =
+    normalizeCall(
+      rows[0] as DbRow,
+    );
+
+  const rendered =
+    await renderResultCard(
+      call,
+    );
+
+  const gain =
+    Math.max(
+      0,
+      (
+        call.peakMultiple -
+        1
+      ) * 100,
+    );
+
+  const tier =
+    tierFromMultiple(
+      call.peakMultiple,
+    );
+
+  const symbol =
+    xAutoPublicSymbol(
+      call.symbol,
+    );
+
+  const tierTag =
+    tierTitle(
+      tier,
+    )
+      .replace(
+        /[^A-Za-z0-9]/g,
+        "",
+      );
+
+  const text =
+    `${symbol} kept expanding after the MemeScope call.\n\n` +
+    `${usd(
+      call.callMarketCapUsd,
+    )} MC -> ${usd(
+      call.peakMarketCapUsd,
+    )} peak\n` +
+    `+${gain.toFixed(
+      0,
+    )}%\n\n` +
+    `tracking the move from the original call.\n\n` +
+    `#MemeScope #Solana #Memecoin #${tierTag}`;
+
+  return {
+    sourceKey:
+      `result:${call.publicId}`,
+    text,
+    image:
+      rendered.buffer,
+    contentType:
+      "result",
+  };
+}
+
+export async function buildXLast72Draft(
+  dateKey: string,
+): Promise<MemeScopeXAutoDraft | null> {
+  const sql =
+    sqlClient();
+
+  const rows =
+    await sql`
+      SELECT
+        signal_record_id,
+        public_id,
+        symbol,
+        called_at,
+        call_market_cap_usd,
+        peak_market_cap_usd,
+        peak_multiple
+      FROM memescope_call_story
+      WHERE
+        called_at >=
+          NOW() -
+          INTERVAL '72 hours'
+        AND COALESCE(
+          peak_multiple,
+          1
+        ) > 1
+      ORDER BY
+        peak_multiple DESC,
+        called_at DESC
+      LIMIT 5
+    `;
+
+  if (!rows.length) {
+    return null;
+  }
+
+  const calls =
+    rows.map(
+      (row) =>
+        normalizeCall(
+          row as DbRow,
+        ),
+    );
+
+  const image =
+    await renderLast72Card(
+      calls,
+    );
+
+  const text =
+    `MemeScope — Last 72 Hours.\n\n` +
+    `Tracked performance from original calls across the rolling 72H window.\n\n` +
+    `#MemeScope #Solana #Memecoin`;
+
+  return {
+    sourceKey:
+      `last72:${dateKey}`,
+    text,
+    image,
+    contentType:
+      "last72",
+  };
+}
+

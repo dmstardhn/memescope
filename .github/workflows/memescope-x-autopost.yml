@@ -1,0 +1,65 @@
+name: MemeScope X Auto Post
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+    - cron: "0 7 * * *"
+    - cron: "0 13 * * *"
+
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Content slot"
+        required: true
+        type: choice
+        options:
+          - text
+          - result
+          - last72
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Resolve content slot
+        id: resolve
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SLOT="${{ inputs.slot }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "0 2 * * *")
+                SLOT="text"
+                ;;
+              "0 7 * * *")
+                SLOT="result"
+                ;;
+              "0 13 * * *")
+                SLOT="last72"
+                ;;
+              *)
+                echo "Unknown schedule"
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "slot=$SLOT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish scheduled MemeScope content
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SLOT: ${{ steps.resolve.outputs.slot }}
+        shell: bash
+        run: |
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 2 \
+            --retry-delay 10 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://memescopes.vercel.app/api/x/scheduler?slot=${SLOT}"
