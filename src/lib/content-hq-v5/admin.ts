@@ -12,7 +12,7 @@ import {
   tierTitle,
   type ContentTier,
 } from "./backgrounds";
-import { renderResultCard } from "./content";
+import { sendLatestRealTierPreview } from "./content";
 
 type TelegramUpdate = {
   callback_query?: {
@@ -167,23 +167,27 @@ async function sendTierMenu(chatId: number, owner: number, tier: ContentTier) {
   });
 }
 
-async function sendPreview(chatId: number, tier: ContentTier) {
-  const multiple = sampleMultiple(tier);
-  const result = await renderResultCard({
-    signalRecordId: "preview",
-    publicId: "MS-1001-437",
-    symbol: "AGENCY",
-    calledAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    callMarketCapUsd: 43_400,
-    peakMarketCapUsd: 43_400 * multiple,
-    peakMultiple: multiple,
-    opportunityId: null,
-  });
-  await sendPhoto(
-    chatId,
-    result.buffer,
-    `<b>${tierTitle(tier)} CONTENT BACKGROUND PREVIEW</b>`,
-  );
+async function sendPreview(
+  chatId: number,
+  tier: ContentTier,
+) {
+  const result =
+    await sendLatestRealTierPreview(
+      tier,
+    );
+
+  if (!result.sent) {
+    await api(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text:
+          `No real tracked ${tierTitle(
+            tier,
+          )} call is available yet.`,
+      },
+    );
+  }
 }
 
 export async function tryHandleContentV5AdminRequest(request: Request) {

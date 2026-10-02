@@ -505,6 +505,123 @@ async function sendCallDraft(
   return sendPhoto(chatId, rendered.buffer, draftCaption(call), replyMarkup);
 }
 
+
+export async function sendLatestRealTierPreview(
+  tier: ContentTier,
+) {
+  await ensureContentBackgroundSchema();
+
+  const chatId =
+    await contentChatId();
+
+  if (!chatId) {
+    return {
+      configured: false,
+      sent: false,
+      reason: "content-hq-not-configured",
+    };
+  }
+
+  const sql =
+    sqlClient();
+
+  const min =
+    tier === "momentum" ? 1 :
+    tier === "breakout" ? 3 :
+    tier === "surge" ? 5 :
+    tier === "apex" ? 10 :
+    tier === "legend" ? 20 :
+    tier === "titan" ? 50 :
+    100;
+
+  const max =
+    tier === "momentum" ? 3 :
+    tier === "breakout" ? 5 :
+    tier === "surge" ? 10 :
+    tier === "apex" ? 20 :
+    tier === "legend" ? 50 :
+    tier === "titan" ? 100 :
+    null;
+
+  const rows =
+    max === null
+      ? await sql`
+          SELECT
+            signal_record_id,
+            public_id,
+            symbol,
+            called_at,
+            call_market_cap_usd,
+            peak_market_cap_usd,
+            peak_multiple
+          FROM memescope_call_story
+          WHERE COALESCE(
+            peak_multiple,
+            1
+          ) >= ${min}
+          ORDER BY
+            called_at DESC
+          LIMIT 1
+        `
+      : await sql`
+          SELECT
+            signal_record_id,
+            public_id,
+            symbol,
+            called_at,
+            call_market_cap_usd,
+            peak_market_cap_usd,
+            peak_multiple
+          FROM memescope_call_story
+          WHERE COALESCE(
+            peak_multiple,
+            1
+          ) >= ${min}
+            AND COALESCE(
+              peak_multiple,
+              1
+            ) < ${max}
+          ORDER BY
+            called_at DESC
+          LIMIT 1
+        `;
+
+  if (!rows.length) {
+    return {
+      configured: true,
+      sent: false,
+      reason: `no-real-${tier}-call`,
+    };
+  }
+
+  const call =
+    normalizeCall(
+      rows[0] as DbRow,
+    );
+
+  const message =
+    await sendCallDraft(
+      chatId,
+      call,
+      false,
+    );
+
+  return {
+    configured: true,
+    sent: true,
+    tier,
+    symbol: call.symbol,
+    publicId: call.publicId,
+    callMarketCapUsd:
+      call.callMarketCapUsd,
+    peakMarketCapUsd:
+      call.peakMarketCapUsd,
+    peakMultiple:
+      call.peakMultiple,
+    messageId:
+      message.message_id,
+  };
+}
 export async function publishPendingContentOpportunityDrafts() {
   await ensureContentBackgroundSchema();
   const chatId = await contentChatId();
