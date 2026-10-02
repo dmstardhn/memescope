@@ -11,6 +11,7 @@ import {
   telegramSiteUrl,
 } from "@/lib/telegram";
 import { renderSignalResultCard } from "@/lib/signal-result-card";
+import { evaluatePersistedCall, nextPublicMilestone } from "@/lib/performance-milestones";
 import type { SignalCall } from "@/lib/signal-types";
 import type { TerminalToken } from "@/lib/terminal-types";
 
@@ -230,18 +231,7 @@ function publicIdFor(callNo: number, calledAt: number) {
   return `MS-${month}${day}-${String(callNo).padStart(3, "0")}`;
 }
 
-function highestPublicMilestone(value: number | null) {
-  if (value === null) return 0;
-  if (value >= 10) return 10;
-  if (value >= 5) return 5;
-  if (value >= 2) return 2;
-  return 0;
-}
-
 const PUBLIC_PERFORMANCE_STAGES = [
-  { stage: 1, multiple: 1.25 },
-  { stage: 2, multiple: 1.50 },
-  { stage: 3, multiple: 2 },
   { stage: 4, multiple: 3 },
   { stage: 5, multiple: 5 },
   { stage: 6, multiple: 10 },
@@ -260,12 +250,6 @@ function highestPublicStage(value: number | null) {
     }
   }
   return result;
-}
-
-function stageMultiple(stage: number) {
-  return PUBLIC_PERFORMANCE_STAGES.find(
-    (item) => item.stage === stage,
-  )?.multiple ?? 0;
 }
 
 function milestoneColumn(milestone: number) {
@@ -298,6 +282,7 @@ export async function ensureCallStorySchema() {
         initialized_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
+    await sql`INSERT INTO memescope_call_story_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS memescope_call_story (
@@ -365,6 +350,12 @@ export async function ensureCallStorySchema() {
       ADD COLUMN IF NOT EXISTS last_public_post_at TIMESTAMPTZ
     `;
 
+    await sql`ALTER TABLE memescope_call_story ADD COLUMN IF NOT EXISTS last_tracked_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE memescope_call_story ADD COLUMN IF NOT EXISTS milestone_claimed_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE memescope_call_story ADD COLUMN IF NOT EXISTS milestone_claimed_value INTEGER`;
+    await sql`ALTER TABLE memescope_call_story_state ADD COLUMN IF NOT EXISTS latest_tracking_run_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE memescope_call_story_state ADD COLUMN IF NOT EXISTS tracking_diagnostics JSONB`;
+
     await sql`
       CREATE TABLE IF NOT EXISTS memescope_call_update_state (
         id INTEGER PRIMARY KEY,
@@ -379,32 +370,37 @@ export async function ensureCallStorySchema() {
       ON CONFLICT (id) DO NOTHING
     `;
 
+    // Earlier schema initialization marked observed peaks as "published" even
+    // when no result was sent. Restore eligibility only where no post evidence exists.
     await sql`
-      UPDATE memescope_call_story
-      SET last_public_stage =
+      UPDATE memescope_call_story c
+      SET last_public_milestone = 0, last_public_stage = 0
+      WHERE c.last_public_post_at IS NULL
+        AND c.telegram_2x_message_id IS NULL
+        AND c.telegram_5x_message_id IS NULL
+        AND c.telegram_10x_message_id IS NULL
+        AND (SELECT version FROM memescope_call_update_state WHERE id = 1) < 3
+    `;
+    await sql`
+      UPDATE memescope_call_story c
+      SET last_public_milestone = GREATEST(last_public_milestone,
         CASE
-          WHEN COALESCE(peak_multiple, 1) >= 100 THEN 9
-          WHEN COALESCE(peak_multiple, 1) >= 50 THEN 8
-          WHEN COALESCE(peak_multiple, 1) >= 20 THEN 7
-          WHEN COALESCE(peak_multiple, 1) >= 10 THEN 6
-          WHEN COALESCE(peak_multiple, 1) >= 5 THEN 5
-          WHEN COALESCE(peak_multiple, 1) >= 3 THEN 4
-          WHEN COALESCE(peak_multiple, 1) >= 2 THEN 3
-          WHEN COALESCE(peak_multiple, 1) >= 1.5 THEN 2
-          WHEN COALESCE(peak_multiple, 1) >= 1.25 THEN 1
+          WHEN last_public_stage >= 9 THEN 100
+          WHEN last_public_stage >= 8 THEN 50
+          WHEN last_public_stage >= 7 THEN 20
+          WHEN last_public_stage >= 6 THEN 10
+          WHEN last_public_stage >= 5 THEN 5
+          WHEN last_public_stage >= 4 THEN 3
           ELSE 0
-        END
-      WHERE (
-        SELECT version
-        FROM memescope_call_update_state
-        WHERE id = 1
-      ) < 2
+        END)
+      WHERE c.last_public_post_at IS NOT NULL
+        AND (SELECT version FROM memescope_call_update_state WHERE id = 1) < 3
     `;
 
     await sql`
       UPDATE memescope_call_update_state
-      SET version = 2, updated_at = NOW()
-      WHERE id = 1 AND version < 2
+      SET version = 3, updated_at = NOW()
+      WHERE id = 1 AND version < 3
     `;
 
     await sql`
@@ -479,19 +475,29 @@ type DexPair = {
 async function fetchMarketSnapshots(addresses: string[]) {
   const unique = Array.from(new Set(addresses.filter(Boolean)));
   const result = new Map<string, MarketSnapshot>();
-
+  const pending: string[][] = [];
   for (let index = 0; index < unique.length; index += 30) {
-    const batch = unique.slice(index, index + 30);
+    pending.push(unique.slice(index, index + 30));
+  }
+  while (pending.length > 0) {
+    const batch = pending.shift()!;
     if (batch.length === 0) continue;
 
     try {
       const response = await fetch(
         `https://api.dexscreener.com/tokens/v1/solana/${batch.join(",")}`,
-        { cache: "no-store", headers: { accept: "application/json" } },
+        { cache: "no-store", headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) },
       );
-      if (!response.ok) continue;
+      if (!response.ok) {
+        if (response.status !== 429 && batch.length > 1) {
+          const middle = Math.ceil(batch.length / 2);
+          pending.push(batch.slice(0, middle), batch.slice(middle));
+        }
+        continue;
+      }
 
       const pairs = (await response.json()) as DexPair[];
+      if (!Array.isArray(pairs)) continue;
       const bestLiquidity = new Map<string, number>();
 
       for (const pair of pairs) {
@@ -509,12 +515,135 @@ async function fetchMarketSnapshots(addresses: string[]) {
         });
         bestLiquidity.set(address, liquidity);
       }
-    } catch {
+    } catch (error) {
       // Keep the last stored snapshot when DexScreener is temporarily unavailable.
+      if (error instanceof SyntaxError && batch.length > 1) {
+        const middle = Math.ceil(batch.length / 2);
+        pending.push(batch.slice(0, middle), batch.slice(middle));
+      }
     }
   }
 
   return result;
+}
+
+async function recoverPublishedCallRows() {
+  const sql = sqlClient();
+  const rows = await sql`
+    SELECT r.id, r.signal_id, r.token_address, r.symbol, r.name,
+      r.opened_at, r.entry_price_usd, r.current_price_usd,
+      r.peak_price_usd, r.peak_gain_pct, r.score_at_entry
+    FROM memescope_signal_records r
+    JOIN memescope_telegram_posts p ON p.signal_record_id = r.id
+    LEFT JOIN memescope_call_story c ON c.signal_record_id = r.id
+    WHERE p.baseline = FALSE AND p.first_sent_at IS NOT NULL
+      AND c.signal_record_id IS NULL
+    ORDER BY r.opened_at ASC
+    LIMIT 100
+  `;
+  let recovered = 0;
+  for (const raw of rows) {
+    const row = raw as DbRow;
+    const entry = numOrNull(row.entry_price_usd);
+    const storedPeak = numOrNull(row.peak_price_usd);
+    const peak = entry && entry > 0 && storedPeak && storedPeak > 0
+      ? Math.max(1, storedPeak / entry) : 1;
+    const inserted = await sql`
+      INSERT INTO memescope_call_story (
+        signal_record_id, signal_id, token_address, symbol, name,
+        called_at, entry_price_usd, current_price_usd, peak_price_usd,
+        peak_multiple, signal_score, baseline
+      ) VALUES (
+        ${String(row.id)}, ${String(row.signal_id)}, ${String(row.token_address)},
+        ${String(row.symbol)}, ${String(row.name)}, ${new Date(millis(row.opened_at)).toISOString()},
+        ${entry}, ${numOrNull(row.current_price_usd)}, ${storedPeak},
+        ${peak}, ${num(row.score_at_entry)}, FALSE
+      ) ON CONFLICT (signal_record_id) DO NOTHING
+      RETURNING signal_record_id
+    `;
+    if (inserted[0]) recovered++;
+    await ensurePublicId(String(row.id));
+  }
+  return recovered;
+}
+
+export async function trackPersistedCallPerformance() {
+  await ensureCallStorySchema();
+  const sql = sqlClient();
+  const recoveredCalls = await recoverPublishedCallRows();
+  const batchSize = Math.max(1, Math.min(300, Number(process.env.PERFORMANCE_TRACK_BATCH_SIZE) || 150));
+  const rows = await sql`
+    SELECT c.* FROM memescope_call_story c
+    JOIN memescope_telegram_posts p ON p.signal_record_id = c.signal_record_id
+    WHERE p.baseline = FALSE AND p.first_sent_at IS NOT NULL
+    ORDER BY c.last_tracked_at ASC NULLS FIRST, c.called_at ASC
+    LIMIT ${batchSize}
+  `;
+  const calls = rows.map((row) => normalizeCall(row as DbRow));
+  const markets = await fetchMarketSnapshots(calls.map((call) => call.tokenAddress));
+  const performanceMarkets = new Map(Array.from(markets, ([address, market]) => [address, {
+    priceUsd: market.priceUsd, marketCapUsd: market.marketCapUsd,
+  }]));
+  const diagnostics: Record<string, number | string> = {
+    trackedCalls: calls.length, recoveredCalls, marketFetchSuccess: 0,
+    marketFetchFailed: 0, updatedCalls: 0, peakBelow3x: 0,
+    reached3x: 0, reached5x: 0, reached10x: 0,
+    reached20x: 0, reached50x: 0, reached100x: 0,
+    pendingMilestones: 0, publishedMilestones: 0,
+    missingMarketData: 0, missingPublicationEvidence: 0, staleCalls: 0,
+    latestTrackingRunAt: new Date().toISOString(),
+  };
+  const missingEvidenceRows = await sql`
+    SELECT COUNT(*) AS count FROM memescope_call_story c
+    LEFT JOIN memescope_telegram_posts p ON p.signal_record_id = c.signal_record_id
+    WHERE p.signal_record_id IS NULL OR p.baseline = TRUE OR p.first_sent_at IS NULL
+  `;
+  diagnostics.missingPublicationEvidence = num((missingEvidenceRows[0] as DbRow).count);
+  for (const call of calls) {
+    try {
+      const observed = evaluatePersistedCall(call, performanceMarkets);
+      if (!observed) {
+        diagnostics.marketFetchFailed = Number(diagnostics.marketFetchFailed) + 1;
+        diagnostics.missingMarketData = Number(diagnostics.missingMarketData) + 1;
+        await sql`UPDATE memescope_call_story SET last_tracked_at = NOW()
+          WHERE signal_record_id = ${call.signalRecordId}`;
+        continue;
+      }
+      diagnostics.marketFetchSuccess = Number(diagnostics.marketFetchSuccess) + 1;
+      const { price, cap, callCap: inferredCallCap } = observed;
+      await sql`
+        UPDATE memescope_call_story SET
+          call_market_cap_usd = COALESCE(call_market_cap_usd, ${inferredCallCap}),
+          current_price_usd = COALESCE(${price}, current_price_usd),
+          current_market_cap_usd = COALESCE(${cap}, current_market_cap_usd),
+          current_multiple = COALESCE(${observed.current}, current_multiple),
+          peak_price_usd = GREATEST(COALESCE(peak_price_usd, 0), COALESCE(${price}, 0)),
+          peak_market_cap_usd = GREATEST(COALESCE(peak_market_cap_usd, 0), COALESCE(${cap}, 0)),
+          peak_multiple = GREATEST(COALESCE(peak_multiple, 1), ${observed.peak}),
+          last_tracked_at = NOW(), updated_at = NOW()
+        WHERE signal_record_id = ${call.signalRecordId}
+      `;
+      diagnostics.updatedCalls = Number(diagnostics.updatedCalls) + 1;
+      const peak = observed.peak;
+      if (peak < 3) diagnostics.peakBelow3x = Number(diagnostics.peakBelow3x) + 1;
+      for (const milestone of [3, 5, 10, 20, 50, 100]) {
+        if (peak >= milestone) diagnostics[`reached${milestone}x`] = Number(diagnostics[`reached${milestone}x`]) + 1;
+      }
+      if (nextPublicMilestone(peak, call.lastPublicMilestone)) {
+        diagnostics.pendingMilestones = Number(diagnostics.pendingMilestones) + 1;
+      }
+      if (Date.now() - call.calledAt > 48 * 60 * 60_000) {
+        diagnostics.staleCalls = Number(diagnostics.staleCalls) + 1;
+      }
+    } catch (error) {
+      diagnostics.marketFetchFailed = Number(diagnostics.marketFetchFailed) + 1;
+      console.error("MemeScope persisted call tracking failed:", call.signalRecordId, error);
+    }
+  }
+  await sql`UPDATE memescope_call_story_state
+    SET latest_tracking_run_at = NOW(), tracking_diagnostics = ${JSON.stringify(diagnostics)}::jsonb
+    WHERE id = 1`;
+  return diagnostics;
 }
 
 async function initializeCallStoryBaseline() {
@@ -597,6 +726,11 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
     SELECT *
     FROM memescope_signal_records
     WHERE opened_at >= NOW() - INTERVAL '60 days'
+      AND NOT EXISTS (
+        SELECT 1 FROM memescope_telegram_posts p
+        WHERE p.signal_record_id = memescope_signal_records.id
+          AND p.baseline = FALSE AND p.first_sent_at IS NOT NULL
+      )
     ORDER BY opened_at ASC
     LIMIT 1000
   `;
@@ -659,8 +793,8 @@ async function syncCallRows(tokens: TerminalToken[], signals: SignalCall[]) {
     );
 
     const baseline = record.openedAt <= state.initializedAt;
-    const initialPublicMilestone = baseline ? highestPublicMilestone(peakMultiple) : 0;
-    const initialPublicStage = baseline ? highestPublicStage(peakMultiple) : 0;
+    const initialPublicMilestone = 0;
+    const initialPublicStage = 0;
     const reasons = signal?.reasons ?? existing?.reasons ?? [];
     const buyPressurePct = signal?.buyShare5m !== null && signal?.buyShare5m !== undefined
       ? signal.buyShare5m * 100
@@ -923,45 +1057,6 @@ function channelMessageUrl(messageId: number | null) {
   return `${channelUrl.replace(/\/+$/, "")}/${messageId}`;
 }
 
-function performanceLabel(call: CallStory) {
-  const peak =
-    call.peakMultiple ??
-    call.currentMultiple ??
-    1;
-
-  if (peak >= 2) {
-    return `${multipleText(peak)} FROM CALL`;
-  }
-
-  const gain =
-    Math.max(
-      0,
-      (peak - 1) * 100,
-    );
-
-  return `+${gain.toFixed(
-    gain >= 100 ? 0 : 1,
-  )}%`;
-}
-
-function performanceTitle(stage: number) {
-  if (stage >= 6) {
-    return "👑 MEMESCOPE RUNNER";
-  }
-
-  if (stage >= 3) {
-    return "🔥 MEMESCOPE RUNNER";
-  }
-
-  return "⚡ MEMESCOPE UPDATE";
-}
-
-function performanceStatus(stage: number) {
-  if (stage >= 3) return "RUNNING";
-  if (stage >= 2) return "MOMENTUM";
-  return "MOVING";
-}
-
 function milestoneButtons(
   call: CallStory,
   originalMessageIdValue: number | null,
@@ -1007,7 +1102,7 @@ function milestoneButtons(
 
 function performanceTelegramText(
   call: CallStory,
-  stage: number,
+  milestone: number,
 ) {
   const peak =
     call.peakMultiple ??
@@ -1034,11 +1129,10 @@ function performanceTelegramText(
     )}</b> \u2192 Peak MC: <b>${compactUsd(
       peakMc,
     )}</b>`,
-    `\u{1F4C8} Peak: <b>${multipleText(
+     `\u{1F4C8} ${milestone}X Result · Peak: <b>${multipleText(
       peak,
-    )}</b> \u00B7 Status: <b>${performanceStatus(
-      stage,
-    )}</b>`,
+     )}</b>`,
+     `Elapsed: <b>${durationText(call.calledAt, Date.now())}</b> · Call ID: <b>${escapeTelegramHtml(call.publicId)}</b>`,
     "",
     `CA: <code>${escapeTelegramHtml(
       call.tokenAddress,
@@ -1058,12 +1152,20 @@ async function publishPendingPublicMilestones() {
     telegramConfig();
 
   const rows = await sql`
-    SELECT *
-    FROM memescope_call_story
-    WHERE baseline = FALSE
-      AND peak_multiple >= 1.25
-      AND last_public_stage < 9
-    ORDER BY called_at ASC
+    SELECT c.*
+    FROM memescope_call_story c
+    JOIN memescope_telegram_posts p ON p.signal_record_id = c.signal_record_id
+    WHERE p.baseline = FALSE AND p.first_sent_at IS NOT NULL
+      AND c.peak_multiple >= 3
+      AND c.last_public_milestone < 100
+      AND c.last_public_milestone < CASE
+        WHEN c.peak_multiple >= 100 THEN 100
+        WHEN c.peak_multiple >= 50 THEN 50
+        WHEN c.peak_multiple >= 20 THEN 20
+        WHEN c.peak_multiple >= 10 THEN 10
+        WHEN c.peak_multiple >= 5 THEN 5
+        ELSE 3 END
+    ORDER BY c.last_public_post_at ASC NULLS FIRST, c.called_at ASC
     LIMIT 40
   `;
 
@@ -1075,51 +1177,36 @@ async function publishPendingPublicMilestones() {
         raw as DbRow,
       );
 
-    const stage =
-      highestPublicStage(
-        call.peakMultiple,
-      );
+    const threshold = nextPublicMilestone(call.peakMultiple, call.lastPublicMilestone);
+    const stage = highestPublicStage(call.peakMultiple);
 
     if (
-      stage <=
-        call.lastPublicStage ||
-      stage === 0
+      threshold === 0 || sent >= 3
     ) {
       continue;
     }
 
-    const threshold =
-      stageMultiple(stage);
+    const claimed = await sql`
+      UPDATE memescope_call_story
+      SET milestone_claimed_at = NOW(), milestone_claimed_value = ${threshold}
+      WHERE signal_record_id = ${call.signalRecordId}
+        AND last_public_milestone < ${threshold}
+        AND (milestone_claimed_at IS NULL OR milestone_claimed_at < NOW() - INTERVAL '20 minutes')
+      RETURNING signal_record_id
+    `;
+    if (!claimed[0]) continue;
 
-    // Small movement updates get a short cooldown so a fast move
-    // does not produce +25% and +50% posts back-to-back.
-    if (
-      stage <= 2 &&
-      call.lastPublicPostAt !== null &&
-      Date.now() -
-        call.lastPublicPostAt <
-        5 * 60_000
-    ) {
-      continue;
-    }
+    try {
 
     const originalMessageIdValue =
       await originalTelegramMessageId(
         call.signalRecordId,
       );
 
-    if (
-      originalMessageIdValue ===
-      null
-    ) {
-      // NEW CALL must exist before an update can be published.
-      continue;
-    }
-
     const caption =
       performanceTelegramText(
         call,
-        stage,
+         threshold,
       );
     const replyMarkup =
       milestoneButtons(
@@ -1142,8 +1229,8 @@ async function publishPendingPublicMilestones() {
               call.callMarketCapUsd,
             peakMarketCapUsd:
               peakMc,
-            peakMultiple:
-              call.peakMultiple,
+             peakMultiple:
+               threshold,
             calledAt:
               call.calledAt,
             tokenAddress:
@@ -1178,38 +1265,25 @@ async function publishPendingPublicMilestones() {
         );
     }
 
-    const legacyMilestone =
-      threshold >= 10
-        ? 10
-        : threshold >= 5
-          ? 5
-          : threshold >= 2
-            ? 2
-            : call.lastPublicMilestone;
-
     await sql`
       UPDATE memescope_call_story
       SET
         last_public_stage = ${stage},
-        last_public_milestone = ${legacyMilestone},
+        last_public_milestone = ${threshold},
         last_public_post_at = NOW(),
+        milestone_claimed_at = NULL,
+        milestone_claimed_value = NULL,
         updated_at = NOW()
       WHERE signal_record_id = ${call.signalRecordId}
     `;
 
-    if (stage === 3) {
-      await sql`
-        UPDATE memescope_call_story
-        SET telegram_2x_message_id = ${message.message_id}
-        WHERE signal_record_id = ${call.signalRecordId}
-      `;
-    } else if (stage === 5) {
+    if (threshold === 5) {
       await sql`
         UPDATE memescope_call_story
         SET telegram_5x_message_id = ${message.message_id}
         WHERE signal_record_id = ${call.signalRecordId}
       `;
-    } else if (stage === 6) {
+    } else if (threshold === 10) {
       await sql`
         UPDATE memescope_call_story
         SET telegram_10x_message_id = ${message.message_id}
@@ -1218,6 +1292,12 @@ async function publishPendingPublicMilestones() {
     }
 
     sent += 1;
+    } catch (error) {
+      await sql`UPDATE memescope_call_story
+        SET milestone_claimed_at = NULL, milestone_claimed_value = NULL
+        WHERE signal_record_id = ${call.signalRecordId} AND milestone_claimed_value = ${threshold}`;
+      console.error("MemeScope VIP milestone publish failed:", call.signalRecordId, error);
+    }
   }
 
   return { sent };
@@ -1499,10 +1579,19 @@ async function publishScheduledReports() {
   return { daily, weekly };
 }
 
-export async function runCallStoryCycle(tokens: TerminalToken[], signals: SignalCall[]) {
+export async function runPersistedPerformanceCycle() {
   await ensureCallStorySchema();
-  const sync = await syncCallRows(tokens, signals);
+  const tracking = await trackPersistedCallPerformance();
   const milestones = await publishPendingPublicMilestones();
+  tracking.publishedMilestones = milestones.sent;
+  const sql = sqlClient();
+  await sql`UPDATE memescope_call_story_state
+    SET tracking_diagnostics = ${JSON.stringify(tracking)}::jsonb WHERE id = 1`;
+  return { tracking, milestones };
+}
+
+export async function runCallStoryCycle() {
+  const { tracking, milestones } = await runPersistedPerformanceCycle();
   await discoverContentOpportunities();
   const content = await publishPendingContentOpportunities();
   const reports = await publishScheduledReports();
@@ -1517,5 +1606,11 @@ export async function runCallStoryCycle(tokens: TerminalToken[], signals: Signal
   // FREE channel cycle is executed directly by /api/telegram/cron.
   // Keep this placeholder for the existing Call Story return shape.
 
-  return { sync, milestones, content, reports, freeChannel };
+  return { tracking, milestones, content, reports, freeChannel };
+}
+
+export async function prepareCallStoryRows(tokens: TerminalToken[], signals: SignalCall[]) {
+  const { ensureTelegramPublisherSchema } = await import("@/lib/telegram-publisher");
+  await ensureTelegramPublisherSchema();
+  return syncCallRows(tokens, signals);
 }

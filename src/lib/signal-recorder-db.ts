@@ -959,12 +959,12 @@ export async function recordSignalSnapshot(
   // Tracks every call independently of the legacy TP lifecycle.
   try {
     const {
-      runCallStoryCycle,
+      prepareCallStoryRows,
     } = await import(
       "@/lib/call-story"
     );
 
-    await runCallStoryCycle(
+    await prepareCallStoryRows(
       tokens,
       signals,
     );
@@ -1021,6 +1021,14 @@ export async function recordSignalSnapshot(
       error,
     );
   }
+  let callPerformance: Record<string, unknown> = {};
+  try {
+    const { runCallStoryCycle } = await import("@/lib/call-story");
+    callPerformance = await runCallStoryCycle();
+  } catch (error) {
+    callPerformance = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    console.error("MemeScope persisted performance cycle failed:", error);
+  }
   return {
     generatedAt: Date.now(),
     tokenCount: tokens.length,
@@ -1033,6 +1041,7 @@ export async function recordSignalSnapshot(
     rekeyedActive,
     deduped,
     telegramPublisher,
+    callPerformance,
     reentryCooldownMinutes:
       SIGNAL_REENTRY_COOLDOWN_MS /
       60_000,

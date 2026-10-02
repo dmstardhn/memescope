@@ -1665,8 +1665,8 @@ async function currentVipResults(): Promise<VipResultRow[]> {
     FROM memescope_call_story c
     INNER JOIN memescope_telegram_posts p
       ON p.signal_record_id = c.signal_record_id
-    WHERE c.baseline = FALSE
-      AND p.message_id IS NOT NULL
+    WHERE p.baseline = FALSE
+      AND p.first_sent_at IS NOT NULL
       AND COALESCE(c.peak_multiple, 1) >= 3
     ORDER BY c.called_at ASC
     LIMIT 500

@@ -94,12 +94,26 @@ export async function GET(
       request.url,
     ).origin;
 
-  const recorder =
-    await protectedPost(
+  let recorder;
+  try {
+    recorder = await protectedPost(
       origin,
       "/api/signals/record",
       secret,
     );
+  } catch (error) {
+    recorder = { ok: false, status: 502, body: { error: error instanceof Error ? error.message : String(error) } };
+  }
+
+  let historicalPerformance: Record<string, unknown> = {};
+  if (!recorder.ok) {
+    try {
+      const { runCallStoryCycle } = await import("@/lib/call-story");
+      historicalPerformance = await runCallStoryCycle();
+    } catch (error) {
+      historicalPerformance = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
 
   let freeChannel:
     Record<string, unknown> =
@@ -183,6 +197,7 @@ return NextResponse.json(
         recorder.ok,
       recorder:
         recorder.body,
+      historicalPerformance,
       freeChannel,
       contentHq,
     },
