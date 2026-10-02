@@ -317,10 +317,10 @@ export async function renderResultCard(call: CallRow) {
 
   const symbolScale =
     symbol.length >= 13
-      ? 8
+      ? 4
       : symbol.length >= 10
-        ? 9
-        : 11;
+        ? 5
+        : 6;
 
   const gainText =
     `+${gain.toFixed(0)}%`;
@@ -364,7 +364,7 @@ export async function renderResultCard(call: CallRow) {
         ),
         650,
         101,
-        6,
+        4,
         a,
       )}
 
@@ -372,7 +372,7 @@ export async function renderResultCard(call: CallRow) {
         "TRACKED PERFORMANCE",
         1450,
         105,
-        4,
+        3,
         "#8c9a95",
         {
           anchor:
@@ -392,7 +392,7 @@ export async function renderResultCard(call: CallRow) {
         gainText,
         650,
         360,
-        14,
+        9,
         a,
       )}
 
@@ -400,7 +400,7 @@ export async function renderResultCard(call: CallRow) {
         "PEAK MOVE SINCE CALL",
         650,
         480,
-        5,
+        4,
         "#8c9a95",
       )}
 
@@ -441,7 +441,7 @@ export async function renderResultCard(call: CallRow) {
         "CALL MC",
         675,
         582,
-        4,
+        3,
         "#8c9a95",
       )}
 
@@ -451,7 +451,7 @@ export async function renderResultCard(call: CallRow) {
         ),
         675,
         630,
-        6,
+        5,
         "#f3f7f5",
       )}
 
@@ -459,7 +459,7 @@ export async function renderResultCard(call: CallRow) {
         "PEAK MC",
         945,
         582,
-        4,
+        3,
         "#8c9a95",
       )}
 
@@ -469,7 +469,7 @@ export async function renderResultCard(call: CallRow) {
         ),
         945,
         630,
-        6,
+        5,
         a,
       )}
 
@@ -477,7 +477,7 @@ export async function renderResultCard(call: CallRow) {
         "ELAPSED",
         1215,
         582,
-        4,
+        3,
         "#8c9a95",
       )}
 
@@ -487,7 +487,7 @@ export async function renderResultCard(call: CallRow) {
         ),
         1215,
         630,
-        6,
+        5,
         "#f3f7f5",
       )}
 
@@ -506,7 +506,7 @@ export async function renderResultCard(call: CallRow) {
         "CALL ID",
         108,
         742,
-        4,
+        3,
         "#8c9a95",
       )}
 
@@ -519,7 +519,7 @@ export async function renderResultCard(call: CallRow) {
           ),
         108,
         788,
-        5,
+        4,
         "#f3f7f5",
       )}
 
@@ -527,7 +527,7 @@ export async function renderResultCard(call: CallRow) {
         "MEMESCOPE RESULT ENGINE",
         1450,
         790,
-        4,
+        3,
         a,
         {
           anchor:
@@ -936,7 +936,7 @@ export async function renderLast72Card(rows: CallRow[]) {
               String(index + 1),
               125,
               y - 12,
-              6,
+              4,
               index === 0
                 ? "#ffd167"
                 : "#87958f",
@@ -954,14 +954,14 @@ export async function renderLast72Card(rows: CallRow[]) {
                 )}`,
               205,
               y - 12,
-              6,
+              4,
               "#f2f6f4",
             ),
             contentPixelText(
               `+${gain.toFixed(0)}%`,
               850,
               y - 12,
-              6,
+              4,
               "#75efad",
               {
                 anchor: "end",
@@ -971,23 +971,8 @@ export async function renderLast72Card(rows: CallRow[]) {
               `${usd(row.callMarketCapUsd)} > ${usd(row.peakMarketCapUsd)}`,
               895,
               y - 6,
-              4,
+              3,
               "#9caaa5",
-            ),
-            contentPixelText(
-              row.publicId
-                .toUpperCase()
-                .slice(
-                  0,
-                  18,
-                ),
-              1460,
-              y - 6,
-              4,
-              "#75847f",
-              {
-                anchor: "end",
-              },
             ),
           ].join("");
         },
@@ -998,10 +983,10 @@ export async function renderLast72Card(rows: CallRow[]) {
     `<svg width="1600" height="900" xmlns="http://www.w3.org/2000/svg">
       <rect width="1600" height="900" fill="#010302" opacity=".28"/>
       ${contentPixelText("MEMESCOPE", 100, 80, 5, "#f2f6f4")}
-      ${contentPixelText("LAST 72 HOURS", 100, 132, 9, "#cfa1ff")}
+      ${contentPixelText("LAST 72 HOURS", 100, 132, 7, "#cfa1ff")}
       ${contentPixelText("", 1460, 148, 4, "#91a09b", { anchor: "end" })}
       ${rowHtml}
-      ${contentPixelText("ROLLING 72H WINDOW / TRACKED CALL PERFORMANCE", 100, 810, 4, "#73827d")}
+      ${contentPixelText("ROLLING 72H WINDOW / TRACKED CALL PERFORMANCE", 100, 810, 3, "#73827d")}
     </svg>`;
 
   return sharp(base)
