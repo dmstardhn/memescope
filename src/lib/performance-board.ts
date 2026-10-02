@@ -432,6 +432,33 @@ async function loadBoardRows() {
   };
 }
 
+function jakartaPerformanceDay(
+  value: unknown,
+) {
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(
+          value === null ||
+          value === undefined
+            ? Date.now()
+            : String(value),
+        );
+
+  return new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone:
+        "Asia/Jakarta",
+      year:
+        "numeric",
+      month:
+        "2-digit",
+      day:
+        "2-digit",
+    },
+  ).format(date);
+}
 function boardText(
   rows: BoardRow[],
   totalCalls: number,
@@ -657,7 +684,22 @@ async function publishBoard(
       state?.message_id,
     );
 
-  if (oldMessageId) {
+  const shouldCreateDailyBoard =
+    Boolean(
+      oldMessageId &&
+      state?.updated_at &&
+      jakartaPerformanceDay(
+        state.updated_at,
+      ) !==
+        jakartaPerformanceDay(
+          Date.now(),
+        ),
+    );
+
+  if (
+    oldMessageId &&
+    !shouldCreateDailyBoard
+  ) {
     try {
       await telegramApi(
         "editMessageText",
@@ -763,6 +805,30 @@ async function publishBoard(
           true,
       },
     );
+
+    if (
+      shouldCreateDailyBoard &&
+      oldMessageId &&
+      oldMessageId !==
+        messageId
+    ) {
+      try {
+        await telegramApi(
+          "unpinChatMessage",
+          {
+            chat_id:
+              chatId,
+            message_id:
+              oldMessageId,
+          },
+        );
+      } catch (error) {
+        console.error(
+          `MemeScope ${channelKey} previous performance board unpin failed:`,
+          error,
+        );
+      }
+    }
   } catch (error) {
     console.error(
       `MemeScope ${channelKey} performance board pin failed. Give the bot permission to pin/edit channel messages:`,
