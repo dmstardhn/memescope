@@ -81,13 +81,13 @@ const GLYPHS: Record<string, string[]> = {
 };
 
 function tierFor(multiple: number): Tier {
-  if (multiple >= 100) return { key: "100x", badge: "100X+ / CENTURY", accent: "#FFF1A6", accent2: "#EAB308" };
-  if (multiple >= 50) return { key: "50x", badge: "50X+ / TITAN", accent: "#FFD166", accent2: "#F97316" };
-  if (multiple >= 20) return { key: "20x", badge: "20X+ / LEGEND", accent: "#D8B4FE", accent2: "#8B5CF6" };
-  if (multiple >= 10) return { key: "10x", badge: "10X+ / APEX", accent: "#FDE68A", accent2: "#F59E0B" };
-  if (multiple >= 5) return { key: "5x", badge: "5X+ / SURGE", accent: "#67E8F9", accent2: "#0891B2" };
-  if (multiple >= 3) return { key: "3x", badge: "3X+ / BREAKOUT", accent: "#62F59A", accent2: "#16A34A" };
-  return { key: "momentum", badge: "LIVE / MOMENTUM", accent: "#25E6C8", accent2: "#0EA5A4" };
+  if (multiple >= 100) return { key: "100x", badge: "CENTURY", accent: "#FFF1A6", accent2: "#EAB308" };
+  if (multiple >= 50) return { key: "50x", badge: "TITAN", accent: "#FFD166", accent2: "#F97316" };
+  if (multiple >= 20) return { key: "20x", badge: "LEGEND", accent: "#D8B4FE", accent2: "#8B5CF6" };
+  if (multiple >= 10) return { key: "10x", badge: "APEX", accent: "#FDE68A", accent2: "#F59E0B" };
+  if (multiple >= 5) return { key: "5x", badge: "SURGE", accent: "#67E8F9", accent2: "#0891B2" };
+  if (multiple >= 3) return { key: "3x", badge: "BREAKOUT", accent: "#62F59A", accent2: "#16A34A" };
+  return { key: "momentum", badge: "MOMENTUM", accent: "#25E6C8", accent2: "#0EA5A4" };
 }
 
 function compactUsd(value: number | null) {
@@ -238,7 +238,6 @@ export async function renderSignalResultCard(input: SignalResultCardInput) {
     ${vectorText("CALL ID", 110, 747, { scale: 3, fill: "#718178", spacing: 4 })}
     ${vectorText(callId, 110, 785, { scale: 4, fill: "#E8F2ED", spacing: 4 })}
 
-    ${vectorText("HISTORICAL PEAK TRACKED AFTER CALL", 650, 790, { scale: 3, fill: "#65756D", spacing: 3 })}
     ${vectorText("MEMESCOPE RESULT ENGINE", 1455, 790, { scale: 3, fill: tier.accent, spacing: 3, align: "right" })}
   </svg>`;
 

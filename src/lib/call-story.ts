@@ -1129,7 +1129,7 @@ function performanceTelegramText(
     )}</b> \u2192 Peak MC: <b>${compactUsd(
       peakMc,
     )}</b>`,
-     `\u{1F4C8} ${milestone}X Result · Peak: <b>${multipleText(
+     `\u{1F4C8} Peak: <b>${multipleText(
       peak,
      )}</b>`,
      `Elapsed: <b>${durationText(call.calledAt, Date.now())}</b> · Call ID: <b>${escapeTelegramHtml(call.publicId)}</b>`,
