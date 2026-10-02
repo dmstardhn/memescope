@@ -695,7 +695,7 @@ export async function renderLast72Card(rows: CallRow[]) {
       <rect width="1600" height="900" fill="#010302" opacity=".28"/>
       ${contentPixelText("MEMESCOPE", 100, 80, 5, "#f2f6f4")}
       ${contentPixelText("LAST 72 HOURS", 100, 132, 9, "#cfa1ff")}
-      ${contentPixelText("TOP TRACKED MOVERS FROM ORIGINAL CALLS", 1460, 148, 4, "#91a09b", { anchor: "end" })}
+      ${contentPixelText("", 1460, 148, 4, "#91a09b", { anchor: "end" })}
       ${rowHtml}
       ${contentPixelText("ROLLING 72H WINDOW / TRACKED CALL PERFORMANCE", 100, 810, 4, "#73827d")}
     </svg>`;
