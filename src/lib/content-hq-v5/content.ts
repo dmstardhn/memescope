@@ -304,7 +304,7 @@ export async function renderResultCard(call: CallRow) {
     );
 
   const symbol =
-    `$${call.symbol
+    `${call.symbol
       .toUpperCase()
       .replace(
         /[^A-Z0-9]/g,
@@ -316,52 +316,239 @@ export async function renderResultCard(call: CallRow) {
       )}`;
 
   const symbolScale =
-    symbol.length > 10
-      ? 10
-      : 13;
+    symbol.length >= 13
+      ? 8
+      : symbol.length >= 10
+        ? 9
+        : 11;
 
-  const svg = `<svg width="1600" height="900" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1600" height="900" fill="#010302" opacity=".25"/>
-    <rect x="615" y="74" width="870" height="86" rx="22" fill="#07100d" opacity=".82" stroke="${a}" stroke-width="2"/>
+  const gainText =
+    `+${gain.toFixed(0)}%`;
 
-    ${contentPixelText("MEMESCOPE", 105, 90, 5, "#edf4f1")}
-    ${contentPixelText(tierTitle(tier), 650, 100, 6, a)}
-    ${contentPixelText("TRACKED PERFORMANCE", 1450, 102, 4, "#8c9a95", { anchor: "end" })}
+  const svg =
+    `<svg
+      width="1600"
+      height="900"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect
+        width="1600"
+        height="900"
+        fill="#010302"
+        opacity=".25"
+      />
 
-    ${contentPixelText(symbol, 650, 242, symbolScale, "#f4f7f6")}
-    ${contentPixelText(`+${gain.toFixed(0)}%`, 650, 355, 16, a)}
-    ${contentPixelText("PEAK MOVE SINCE CALL", 650, 478, 5, "#8c9a95")}
+      <rect
+        x="615"
+        y="74"
+        width="870"
+        height="86"
+        rx="22"
+        fill="#07100d"
+        opacity=".82"
+        stroke="${a}"
+        stroke-width="2"
+      />
 
-    <rect x="650" y="555" width="245" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
-    <rect x="920" y="555" width="245" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
-    <rect x="1190" y="555" width="280" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
+      ${contentPixelText(
+        "MEMESCOPE",
+        105,
+        90,
+        5,
+        "#edf4f1",
+      )}
 
-    ${contentPixelText("CALL MC", 675, 582, 4, "#8c9a95")}
-    ${contentPixelText(usd(call.callMarketCapUsd), 675, 626, 7, "#f3f7f5")}
+      ${contentPixelText(
+        tierTitle(
+          tier,
+        ),
+        650,
+        101,
+        6,
+        a,
+      )}
 
-    ${contentPixelText("PEAK MC", 945, 582, 4, "#8c9a95")}
-    ${contentPixelText(usd(call.peakMarketCapUsd), 945, 626, 7, a)}
+      ${contentPixelText(
+        "TRACKED PERFORMANCE",
+        1450,
+        105,
+        4,
+        "#8c9a95",
+        {
+          anchor:
+            "end",
+        },
+      )}
 
-    ${contentPixelText("ELAPSED", 1215, 582, 4, "#8c9a95")}
-    ${contentPixelText(elapsed(call.calledAt), 1215, 626, 7, "#f3f7f5")}
+      ${contentPixelText(
+        symbol,
+        650,
+        245,
+        symbolScale,
+        "#f4f7f6",
+      )}
 
-    <rect x="82" y="712" width="455" height="120" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
+      ${contentPixelText(
+        gainText,
+        650,
+        360,
+        14,
+        a,
+      )}
 
-    ${contentPixelText("CALL ID", 108, 744, 4, "#8c9a95")}
-    ${contentPixelText(call.publicId.toUpperCase().slice(0, 22), 108, 788, 3.4, "#f3f7f5")}
+      ${contentPixelText(
+        "PEAK MOVE SINCE CALL",
+        650,
+        480,
+        5,
+        "#8c9a95",
+      )}
 
-    ${contentPixelText("MEMESCOPE RESULT ENGINE", 1450, 786, 4, a, { anchor: "end" })}
-  </svg>`;
+      <rect
+        x="650"
+        y="555"
+        width="245"
+        height="146"
+        rx="18"
+        fill="#06100c"
+        opacity=".86"
+        stroke="#52635d"
+      />
+
+      <rect
+        x="920"
+        y="555"
+        width="245"
+        height="146"
+        rx="18"
+        fill="#06100c"
+        opacity=".86"
+        stroke="#52635d"
+      />
+
+      <rect
+        x="1190"
+        y="555"
+        width="280"
+        height="146"
+        rx="18"
+        fill="#06100c"
+        opacity=".86"
+        stroke="#52635d"
+      />
+
+      ${contentPixelText(
+        "CALL MC",
+        675,
+        582,
+        4,
+        "#8c9a95",
+      )}
+
+      ${contentPixelText(
+        usd(
+          call.callMarketCapUsd,
+        ),
+        675,
+        630,
+        6,
+        "#f3f7f5",
+      )}
+
+      ${contentPixelText(
+        "PEAK MC",
+        945,
+        582,
+        4,
+        "#8c9a95",
+      )}
+
+      ${contentPixelText(
+        usd(
+          call.peakMarketCapUsd,
+        ),
+        945,
+        630,
+        6,
+        a,
+      )}
+
+      ${contentPixelText(
+        "ELAPSED",
+        1215,
+        582,
+        4,
+        "#8c9a95",
+      )}
+
+      ${contentPixelText(
+        elapsed(
+          call.calledAt,
+        ),
+        1215,
+        630,
+        6,
+        "#f3f7f5",
+      )}
+
+      <rect
+        x="82"
+        y="712"
+        width="455"
+        height="120"
+        rx="18"
+        fill="#06100c"
+        opacity=".86"
+        stroke="#52635d"
+      />
+
+      ${contentPixelText(
+        "CALL ID",
+        108,
+        742,
+        4,
+        "#8c9a95",
+      )}
+
+      ${contentPixelText(
+        call.publicId
+          .toUpperCase()
+          .slice(
+            0,
+            22,
+          ),
+        108,
+        788,
+        5,
+        "#f3f7f5",
+      )}
+
+      ${contentPixelText(
+        "MEMESCOPE RESULT ENGINE",
+        1450,
+        790,
+        4,
+        a,
+        {
+          anchor:
+            "end",
+        },
+      )}
+    </svg>`;
 
   return {
     tier,
+
     buffer:
-      await sharp(base)
+      await sharp(
+        base,
+      )
         .composite([
           {
             input:
               Buffer.from(
                 svg,
+                "utf8",
               ),
           },
         ])
