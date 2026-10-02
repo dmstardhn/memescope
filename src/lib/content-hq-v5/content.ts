@@ -87,6 +87,152 @@ function accent(tier: ContentTier) {
   return colors[tier];
 }
 
+const CONTENT_GLYPHS: Record<string, string[]> = {
+  " ": ["00000","00000","00000","00000","00000","00000","00000"],
+  "A": ["01110","10001","10001","11111","10001","10001","10001"],
+  "B": ["11110","10001","10001","11110","10001","10001","11110"],
+  "C": ["01111","10000","10000","10000","10000","10000","01111"],
+  "D": ["11110","10001","10001","10001","10001","10001","11110"],
+  "E": ["11111","10000","10000","11110","10000","10000","11111"],
+  "F": ["11111","10000","10000","11110","10000","10000","10000"],
+  "G": ["01111","10000","10000","10111","10001","10001","01111"],
+  "H": ["10001","10001","10001","11111","10001","10001","10001"],
+  "I": ["11111","00100","00100","00100","00100","00100","11111"],
+  "J": ["00111","00010","00010","00010","10010","10010","01100"],
+  "K": ["10001","10010","10100","11000","10100","10010","10001"],
+  "L": ["10000","10000","10000","10000","10000","10000","11111"],
+  "M": ["10001","11011","10101","10101","10001","10001","10001"],
+  "N": ["10001","11001","10101","10011","10001","10001","10001"],
+  "O": ["01110","10001","10001","10001","10001","10001","01110"],
+  "P": ["11110","10001","10001","11110","10000","10000","10000"],
+  "Q": ["01110","10001","10001","10001","10101","10010","01101"],
+  "R": ["11110","10001","10001","11110","10100","10010","10001"],
+  "S": ["01111","10000","10000","01110","00001","00001","11110"],
+  "T": ["11111","00100","00100","00100","00100","00100","00100"],
+  "U": ["10001","10001","10001","10001","10001","10001","01110"],
+  "V": ["10001","10001","10001","10001","10001","01010","00100"],
+  "W": ["10001","10001","10001","10101","10101","11011","10001"],
+  "X": ["10001","10001","01010","00100","01010","10001","10001"],
+  "Y": ["10001","10001","01010","00100","00100","00100","00100"],
+  "Z": ["11111","00001","00010","00100","01000","10000","11111"],
+  "0": ["01110","10001","10011","10101","11001","10001","01110"],
+  "1": ["00100","01100","00100","00100","00100","00100","01110"],
+  "2": ["01110","10001","00001","00010","00100","01000","11111"],
+  "3": ["11110","00001","00001","01110","00001","00001","11110"],
+  "4": ["00010","00110","01010","10010","11111","00010","00010"],
+  "5": ["11111","10000","10000","11110","00001","00001","11110"],
+  "6": ["01110","10000","10000","11110","10001","10001","01110"],
+  "7": ["11111","00001","00010","00100","01000","01000","01000"],
+  "8": ["01110","10001","10001","01110","10001","10001","01110"],
+  "9": ["01110","10001","10001","01111","00001","00001","01110"],
+  "$": ["00100","01111","10100","01110","00101","11110","00100"],
+  "+": ["00000","00100","00100","11111","00100","00100","00000"],
+  "%": ["11001","11010","00100","01000","10110","00110","00000"],
+  ".": ["00000","00000","00000","00000","00000","00110","00110"],
+  ",": ["00000","00000","00000","00000","00110","00110","00100"],
+  "-": ["00000","00000","00000","11111","00000","00000","00000"],
+  "/": ["00001","00010","00010","00100","01000","01000","10000"],
+  ":": ["00000","00110","00110","00000","00110","00110","00000"],
+  "(": ["00010","00100","01000","01000","01000","00100","00010"],
+  ")": ["01000","00100","00010","00010","00010","00100","01000"],
+  ">": ["10000","01000","00100","00010","00100","01000","10000"],
+  "<": ["00001","00010","00100","01000","00100","00010","00001"],
+  "?": ["11110","00001","00010","00100","00100","00000","00100"],
+};
+
+function contentTextWidth(
+  value: string,
+  scale: number,
+) {
+  return Math.max(
+    0,
+    value.length * 6 * scale - scale,
+  );
+}
+
+function contentPixelText(
+  raw: string,
+  x: number,
+  y: number,
+  scale: number,
+  color: string,
+  options?: {
+    anchor?: "start" | "middle" | "end";
+    opacity?: number;
+  },
+) {
+  const value =
+    raw
+      .toUpperCase()
+      .replace(
+        /[^A-Z0-9 $+%.,\-/:()<>]/g,
+        "?",
+      );
+
+  const width =
+    contentTextWidth(
+      value,
+      scale,
+    );
+
+  let left = x;
+
+  if (
+    options?.anchor === "middle"
+  ) {
+    left -= width / 2;
+  } else if (
+    options?.anchor === "end"
+  ) {
+    left -= width;
+  }
+
+  const opacity =
+    options?.opacity ?? 1;
+
+  const pieces: string[] = [];
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
+    const glyph =
+      CONTENT_GLYPHS[
+        value[index]
+      ] ??
+      CONTENT_GLYPHS["?"];
+
+    const ox =
+      left +
+      index * scale * 6;
+
+    for (
+      let row = 0;
+      row < 7;
+      row += 1
+    ) {
+      for (
+        let col = 0;
+        col < 5;
+        col += 1
+      ) {
+        if (
+          glyph[row]?.[col] !== "1"
+        ) {
+          continue;
+        }
+
+        pieces.push(
+          `<rect x="${(ox + col * scale).toFixed(1)}" y="${(y + row * scale).toFixed(1)}" width="${scale}" height="${scale}" rx="${Math.max(0, scale * 0.08).toFixed(2)}" fill="${color}" opacity="${opacity}"/>`,
+        );
+      }
+    }
+  }
+
+  return pieces.join("");
+}
+
 function normalizeCall(row: DbRow): CallRow {
   return {
     signalRecordId: String(row.signal_record_id ?? ""),
@@ -135,45 +281,95 @@ async function background(tier: ContentTier) {
 }
 
 export async function renderResultCard(call: CallRow) {
-  const tier = tierFromMultiple(call.peakMultiple);
-  const a = accent(tier);
-  const gain = Math.max(0, (call.peakMultiple - 1) * 100);
-  const base = await background(tier);
+  const tier =
+    tierFromMultiple(
+      call.peakMultiple,
+    );
+
+  const a =
+    accent(tier);
+
+  const gain =
+    Math.max(
+      0,
+      (
+        call.peakMultiple -
+        1
+      ) * 100,
+    );
+
+  const base =
+    await background(
+      tier,
+    );
+
+  const symbol =
+    `$${call.symbol
+      .toUpperCase()
+      .replace(
+        /[^A-Z0-9]/g,
+        "",
+      )
+      .slice(
+        0,
+        14,
+      )}`;
+
+  const symbolScale =
+    symbol.length > 10
+      ? 10
+      : 13;
+
   const svg = `<svg width="1600" height="900" xmlns="http://www.w3.org/2000/svg">
-    <style>
-      .mono{font-family:monospace;font-weight:700;letter-spacing:2px}
-      .label{font-family:monospace;font-weight:600;letter-spacing:2px;fill:#8c9a95}
-      .value{font-family:monospace;font-weight:700;fill:#f3f7f5}
-    </style>
     <rect width="1600" height="900" fill="#010302" opacity=".25"/>
     <rect x="615" y="74" width="870" height="86" rx="22" fill="#07100d" opacity=".82" stroke="${a}" stroke-width="2"/>
-    <text x="105" y="120" class="mono" font-size="38" fill="#edf4f1">MEMESCOPE</text>
-    <text x="650" y="130" class="mono" font-size="46" fill="${a}">${esc(tierTitle(tier))}</text>
-    <text x="1450" y="125" text-anchor="end" class="label" font-size="25">TRACKED PERFORMANCE</text>
-    <text x="650" y="320" class="mono" font-size="92" fill="#f4f7f6">$${esc(call.symbol.toUpperCase().slice(0, 14))}</text>
-    <text x="650" y="455" class="mono" font-size="122" fill="${a}">+${gain.toFixed(0)}%</text>
-    <text x="650" y="505" class="label" font-size="30">PEAK MOVE SINCE CALL</text>
+
+    ${contentPixelText("MEMESCOPE", 105, 90, 5, "#edf4f1")}
+    ${contentPixelText(tierTitle(tier), 650, 100, 6, a)}
+    ${contentPixelText("TRACKED PERFORMANCE", 1450, 102, 4, "#8c9a95", { anchor: "end" })}
+
+    ${contentPixelText(symbol, 650, 242, symbolScale, "#f4f7f6")}
+    ${contentPixelText(`+${gain.toFixed(0)}%`, 650, 355, 16, a)}
+    ${contentPixelText("PEAK MOVE SINCE CALL", 650, 478, 5, "#8c9a95")}
+
     <rect x="650" y="555" width="245" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
     <rect x="920" y="555" width="245" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
     <rect x="1190" y="555" width="280" height="146" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
-    <text x="675" y="602" class="label" font-size="24">CALL MC</text>
-    <text x="675" y="665" class="value" font-size="48">${esc(usd(call.callMarketCapUsd))}</text>
-    <text x="945" y="602" class="label" font-size="24">PEAK MC</text>
-    <text x="945" y="665" class="mono" font-size="48" fill="${a}">${esc(usd(call.peakMarketCapUsd))}</text>
-    <text x="1215" y="602" class="label" font-size="24">ELAPSED</text>
-    <text x="1215" y="665" class="value" font-size="48">${esc(elapsed(call.calledAt))}</text>
+
+    ${contentPixelText("CALL MC", 675, 582, 4, "#8c9a95")}
+    ${contentPixelText(usd(call.callMarketCapUsd), 675, 626, 7, "#f3f7f5")}
+
+    ${contentPixelText("PEAK MC", 945, 582, 4, "#8c9a95")}
+    ${contentPixelText(usd(call.peakMarketCapUsd), 945, 626, 7, a)}
+
+    ${contentPixelText("ELAPSED", 1215, 582, 4, "#8c9a95")}
+    ${contentPixelText(elapsed(call.calledAt), 1215, 626, 7, "#f3f7f5")}
+
     <rect x="82" y="712" width="455" height="120" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
-    <text x="108" y="758" class="label" font-size="23">CALL ID</text>
-    <text x="108" y="807" class="value" font-size="38">${esc(call.publicId.toUpperCase().slice(0, 22))}</text>
-    <text x="1450" y="805" text-anchor="end" class="mono" font-size="25" fill="${a}">MEMESCOPE RESULT ENGINE</text>
+
+    ${contentPixelText("CALL ID", 108, 744, 4, "#8c9a95")}
+    ${contentPixelText(call.publicId.toUpperCase().slice(0, 22), 108, 788, 6, "#f3f7f5")}
+
+    ${contentPixelText("MEMESCOPE RESULT ENGINE", 1450, 786, 4, a, { anchor: "end" })}
   </svg>`;
 
   return {
     tier,
-    buffer: await sharp(base)
-      .composite([{ input: Buffer.from(svg) }])
-      .webp({ quality: 94 })
-      .toBuffer(),
+    buffer:
+      await sharp(base)
+        .composite([
+          {
+            input:
+              Buffer.from(
+                svg,
+              ),
+          },
+        ])
+        .webp({
+          quality:
+            94,
+        })
+        .toBuffer(),
   };
 }
 
@@ -401,32 +597,122 @@ async function last72Rows() {
 }
 
 export async function renderLast72Card(rows: CallRow[]) {
-  const base = await background("legend");
-  const rowHtml = rows.slice(0, 5).map((row, index) => {
-    const gain = Math.max(0, (row.peakMultiple - 1) * 100);
-    const y = 245 + index * 118;
-    return `<g>
-      <rect x="95" y="${y - 48}" width="1410" height="96" rx="18" fill="#06100c" opacity=".87" stroke="#41534d"/>
-      <text x="125" y="${y + 12}" font-family="monospace" font-size="38" font-weight="700" fill="${index === 0 ? "#ffd167" : "#87958f"}">${index + 1}</text>
-      <text x="205" y="${y + 12}" font-family="monospace" font-size="38" font-weight="700" fill="#f2f6f4">$${esc(row.symbol.toUpperCase().slice(0, 12))}</text>
-      <text x="850" y="${y + 12}" text-anchor="end" font-family="monospace" font-size="38" font-weight="700" fill="#75efad">+${gain.toFixed(0)}%</text>
-      <text x="895" y="${y + 8}" font-family="monospace" font-size="25" fill="#9caaa5">${esc(usd(row.callMarketCapUsd))} -> ${esc(usd(row.peakMarketCapUsd))}</text>
-      <text x="1460" y="${y + 8}" text-anchor="end" font-family="monospace" font-size="22" fill="#75847f">${esc(row.publicId.toUpperCase().slice(0, 18))}</text>
-    </g>`;
-  }).join("");
+  const base =
+    await background(
+      "legend",
+    );
 
-  const svg = `<svg width="1600" height="900" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1600" height="900" fill="#010302" opacity=".28"/>
-    <text x="100" y="105" font-family="monospace" font-size="34" font-weight="700" fill="#f2f6f4">MEMESCOPE</text>
-    <text x="100" y="170" font-family="monospace" font-size="62" font-weight="800" fill="#cfa1ff">LAST 72 HOURS</text>
-    <text x="1460" y="160" text-anchor="end" font-family="monospace" font-size="25" fill="#91a09b">TOP TRACKED MOVERS FROM ORIGINAL CALLS</text>
-    ${rowHtml}
-    <text x="100" y="835" font-family="monospace" font-size="22" fill="#73827d">ROLLING 72H WINDOW · TRACKED CALL PERFORMANCE</text>
-  </svg>`;
+  const rowHtml =
+    rows
+      .slice(
+        0,
+        5,
+      )
+      .map(
+        (
+          row,
+          index,
+        ) => {
+          const gain =
+            Math.max(
+              0,
+              (
+                row.peakMultiple -
+                1
+              ) * 100,
+            );
+
+          const y =
+            245 +
+            index * 118;
+
+          return [
+            `<rect x="95" y="${y - 48}" width="1410" height="96" rx="18" fill="#06100c" opacity=".87" stroke="#41534d"/>`,
+            contentPixelText(
+              String(index + 1),
+              125,
+              y - 12,
+              6,
+              index === 0
+                ? "#ffd167"
+                : "#87958f",
+            ),
+            contentPixelText(
+              `$${row.symbol
+                .toUpperCase()
+                .replace(
+                  /[^A-Z0-9]/g,
+                  "",
+                )
+                .slice(
+                  0,
+                  12,
+                )}`,
+              205,
+              y - 12,
+              6,
+              "#f2f6f4",
+            ),
+            contentPixelText(
+              `+${gain.toFixed(0)}%`,
+              850,
+              y - 12,
+              6,
+              "#75efad",
+              {
+                anchor: "end",
+              },
+            ),
+            contentPixelText(
+              `${usd(row.callMarketCapUsd)} > ${usd(row.peakMarketCapUsd)}`,
+              895,
+              y - 6,
+              4,
+              "#9caaa5",
+            ),
+            contentPixelText(
+              row.publicId
+                .toUpperCase()
+                .slice(
+                  0,
+                  18,
+                ),
+              1460,
+              y - 6,
+              4,
+              "#75847f",
+              {
+                anchor: "end",
+              },
+            ),
+          ].join("");
+        },
+      )
+      .join("");
+
+  const svg =
+    `<svg width="1600" height="900" xmlns="http://www.w3.org/2000/svg">
+      <rect width="1600" height="900" fill="#010302" opacity=".28"/>
+      ${contentPixelText("MEMESCOPE", 100, 80, 5, "#f2f6f4")}
+      ${contentPixelText("LAST 72 HOURS", 100, 132, 9, "#cfa1ff")}
+      ${contentPixelText("TOP TRACKED MOVERS FROM ORIGINAL CALLS", 1460, 148, 4, "#91a09b", { anchor: "end" })}
+      ${rowHtml}
+      ${contentPixelText("ROLLING 72H WINDOW / TRACKED CALL PERFORMANCE", 100, 810, 4, "#73827d")}
+    </svg>`;
 
   return sharp(base)
-    .composite([{ input: Buffer.from(svg) }])
-    .webp({ quality: 94 })
+    .composite([
+      {
+        input:
+          Buffer.from(
+            svg,
+          ),
+      },
+    ])
+    .webp({
+      quality:
+        94,
+    })
     .toBuffer();
 }
 
