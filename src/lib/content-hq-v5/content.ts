@@ -348,7 +348,7 @@ export async function renderResultCard(call: CallRow) {
     <rect x="82" y="712" width="455" height="120" rx="18" fill="#06100c" opacity=".86" stroke="#52635d"/>
 
     ${contentPixelText("CALL ID", 108, 744, 4, "#8c9a95")}
-    ${contentPixelText(call.publicId.toUpperCase().slice(0, 22), 108, 788, 6, "#f3f7f5")}
+    ${contentPixelText(call.publicId.toUpperCase().slice(0, 22), 108, 788, 3.4, "#f3f7f5")}
 
     ${contentPixelText("MEMESCOPE RESULT ENGINE", 1450, 786, 4, a, { anchor: "end" })}
   </svg>`;
